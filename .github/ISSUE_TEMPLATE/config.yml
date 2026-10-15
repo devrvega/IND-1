@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: The manual
+    url: https://github.com/devrvega/IND-1/blob/main/docs/MANUAL.md
+    about: Every control, page, editor and piece, and Troubleshooting (including recovering an FM-1 that won't start).
+  - name: Try IND-1 in the browser
+    url: https://devrvega.github.io/IND-1/emu/
+    about: The same code as the firmware, with sound, no FM-1 needed. Handy to check how something behaves.

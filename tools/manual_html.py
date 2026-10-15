@@ -19,11 +19,11 @@ SRC = Path(__file__).resolve().parents[1]
 PART_COLOURS = {}                                     # (X0X marks its parts with a swatch; IND-1 has none)
 
 CSS = """
-/* IND-1's colours, as its screen and the site: near-black, steel greys, hazard orange (the names are
+/* IND-1's colours, as its screen and the site: near-black, steel greys, ember orange (the names are
    AMB-1's, whose manual this page's layout comes from) */
 :root {
-  --paper: #121214; --sheet: #222226; --green-1: #3a3a40; --green-3: #5a5a62;
-  --river: #ff8a18; --river-2: #ff8a18; --ink: #e8e4d8; --muted: #9a978e; --rule: #3a3a40;
+  --paper: #111012; --sheet: #222226; --green-1: #3a3a40; --green-3: #5a5a62;
+  --river: #ff8628; --river-2: #ff8628; --ink: #e8e4d8; --muted: #9a978e; --rule: #3a3a40;
   color-scheme: dark;
 }
 body {

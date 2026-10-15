@@ -1,5 +1,6 @@
 # the manual's screenshots (tools/manual_shots.sh copies them into docs/img): Foundry, from power-on
-wait 200
+wait 3000
+shot screen-intro.png
 until section 1 20000
 wait 5000
 shot screen-verse.png
@@ -35,7 +36,7 @@ wait 1000
 shot screen-help.png
 release SAVE
 wait 300
-# a breakdown, a mute
+# the quest: a breakdown, the build, the drop, a mute
 until step 2 4000
 tap REC
 wait 50
@@ -49,6 +50,7 @@ wait 3000
 shot screen-build.png
 until section 5 12000
 wait 1500
+shot screen-drop.png
 press EDIT
 tap ENV
 release EDIT
@@ -65,3 +67,46 @@ until step 3 4000
 tapkey 6
 wait 40
 shot screen-root.png
+# on through the song, shorter: a chorus, the outro
+spin K2 1
+until section 3 40000
+wait 2500
+shot screen-chorus.png
+until section 6 200000
+wait 3000
+shot screen-outro.png
+# the editors: the page's button again
+tap HOME
+wait 200
+shot screen-song.png
+turn SELECT 2
+wait 1500
+shot screen-chords.png
+turn SELECT -2
+tap SEQ
+wait 200
+tapkey b1
+wait 1500
+shot screen-edit-drums.png
+tap LFO
+wait 1500
+shot screen-edit-bass.png
+tap ENV
+wait 1500
+shot screen-edit-guitar.png
+tap ARP
+wait 1500
+shot screen-edit-synth.png
+tap SEL
+wait 1500
+shot screen-edit-metal.png
+# a step held: its own knobs (this writes the song, and locks it)
+tap LFO
+wait 200
+tapkey b4
+key w9 down
+wait 100
+turn K2 1
+wait 1500
+shot screen-step.png
+key w9 up

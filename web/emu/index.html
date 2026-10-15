@@ -9,8 +9,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600&family=Barlow+Semi+Condensed:wght@600;700&display=swap">
 <style>
-/* a factory at night, as IND-1's screen: near-black, steel greys, hazard orange */
-:root { --ground: #121214; --ink: #e8e4d8; --muted: #9a978e; --rule: #e8e4d8; --accent: #ff8a18; --river: #ff8a18; --river-2: #ff8a18;
+/* IND-1's screen: a dark case, the LCD's ember orange */
+:root { --ground: #111012; --ink: #e8e4d8; --muted: #9a978e; --rule: #e8e4d8; --accent: #ff8628; --river: #ff8628; --river-2: #ff8628;
         --green-1: #3a3a40; --card: #222226; color-scheme: dark; }
 body { background: var(--ground); color: var(--ink); margin: 0; padding-inline: 16px; padding-block: 28px 48px;
        font: 400 16px/1.55 "Helvetica Neue", Helvetica, Arial, sans-serif; }
@@ -40,7 +40,7 @@ a { color: var(--ink); text-decoration-color: var(--river-2); text-decoration-th
 .lit .keyface.black { fill: #4cc3b6; }
 .start { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(10, 11, 13, .55); border-radius: 4.4% / 6.9%; }
 .start button { font: 400 1.2rem "Helvetica Neue", Helvetica, Arial, sans-serif; letter-spacing: .08em; text-transform: uppercase; padding: .6em 1.6em;
-                border: 1px solid var(--ink); background: var(--river); color: #121214; cursor: pointer; }
+                border: 1px solid var(--ink); background: var(--river); color: #111012; cursor: pointer; }
 .start[hidden] { display: none; }
 .turn { display: none; margin: 0 0 .8rem; color: var(--muted); font-size: .92rem; }
 @media (orientation: portrait) and (max-width: 700px) { .turn { display: block; } }
@@ -87,7 +87,7 @@ kbd { font: 600 .85em ui-monospace, Menlo, monospace; background: var(--card); b
 <section class="help">
   <div class="knobs">
     <h2>Pages and knobs</h2>
-    <p>One page a layer, each on its own button; a layer's level is KNOB 1. <b>SELECT</b> steps through the pages. Each piece remembers its own settings.</p>
+    <p>One page a layer, each on its own button; a layer's level is KNOB 1. <b>SELECT</b> steps through the pages. Each piece remembers its own settings, and its song. A page's button pressed again opens its editor (below).</p>
     <div class="pages">
       <div>
         <h3>Machine <span>HOME</span></h3>
@@ -146,7 +146,17 @@ kbd { font: 600 .85em ui-monospace, Menlo, monospace; background: var(--card); b
       <li><b>PLAY</b> runs / stops. <b>EDIT</b> the next section. <b>REC</b> a breakdown; again, the build; again, the drop.</li>
       <li><b>OCT−</b> a fill, <b>OCT+</b> new riffs and lines (mutate). Hold <b>EDIT</b> and press a layer's page button to mute it.</li>
       <li><b>SELECT</b> the previous or next page; with <b>HOME</b> held, the tempo. <b>ALGORITHM</b> the mode, <b>PRESETS</b> the piece (each remembers how you left it).</li>
-      <li><b>SAVE</b> saves; hold it to reset the piece. Hold any button for a second and a card says what it does (with a mouse: <kbd>Shift</kbd>-click to hold it, click again to let go).</li>
+      <li><b>SAVE</b> saves; hold it to reset the piece (and give its song back to the machine). Hold any button for a second and a card says what it does (with a mouse: <kbd>Shift</kbd>-click to hold it, click again to let go).</li>
+    </ul>
+  </div>
+  <div>
+    <h2>Your songs: the editors</h2>
+    <ul>
+      <li>A page's button again: <b>HOME</b> the song, <b>SEQ</b> the drums, <b>LFO</b> the bass, <b>ENV</b> the guitar, <b>ARP</b> the synth, <b>SEL</b> the metal's rings. Again: back to the page.</li>
+      <li>The <b>white keys</b> are the sixteen steps (in the song editor, the sections); the <b>black keys</b> pick a drum, a note of the mode, or (in the song editor) turn a layer on and off.</li>
+      <li>A white key on an empty step puts the drum or note there; pressed and let go on one that has it, it goes. Held, the knobs are the step's own (accent, slide, open chord, octave...).</li>
+      <li><b>ENV</b> + a step: an accent. <b>EDIT</b> + a step: cleared. <b>SELECT</b>: the part (A the verse, B the chorus, C the breakdown).</li>
+      <li>Any edit locks the song: the machine changes nothing in it by itself. KNOB 4 in the song editor turns it back to auto.</li>
     </ul>
   </div>
   <div>

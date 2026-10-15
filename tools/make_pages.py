@@ -38,16 +38,19 @@ LANDING = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>IND-1</title>
-<meta name="description" content="A self-playing industrial machine for the M-VAVE FM-1, after KMFDM, Nine Inch Nails and Ministry: distorted drums, a sequenced bass, guitars, FM stabs, metal and noise, in songs it arranges itself.">
-<meta name="theme-color" content="#121214">
+<meta name="description" content="A self-playing industrial machine for the M-VAVE FM-1, after KMFDM, Nine Inch Nails and Ministry: distorted drums, a sequenced bass, guitars, FM stabs, metal and noise, in songs it arranges itself, or that you write yourself. On the screen, a quest on a dark LCD.">
+<meta name="theme-color" content="#111012">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230c0908'/%3E%3Crect x='3' y='3' width='2' height='10' fill='%23ff8628'/%3E%3Crect x='7' y='3' width='6' height='2' fill='%23ff8628'/%3E%3Crect x='9' y='5' width='2' height='8' fill='%23ff8628'/%3E%3C/svg%3E">
 <style>
-/* a factory at night, as IND-1's screen: near-black, steel greys, hazard orange */
-:root { --paper: #121214; --sheet: #222226; --ink: #e8e4d8; --muted: #9a978e; --hazard: #ff8a18; --rule: #3a3a40;
-        color-scheme: dark; }
+/* IND-1's screen: a dark LCD (near-black glass, ember segments, their ghosts) in a dark case */
+:root { --paper: #111012; --sheet: #242226; --ink: #eae4d8; --muted: #9c968e; --hazard: #ff8628; --rule: #3c383c;
+        --glass: #0c0908; --ghost: #281810; --edge: #3c2d24; color-scheme: dark; }
 body { background: var(--paper); color: var(--ink); margin: 0; padding-inline: 16px; padding-block: 48px 64px;
        font: 400 17px/1.6 "Helvetica Neue", Helvetica, Arial, sans-serif; }
 main { max-width: 42rem; margin: 0 auto; }
-h1 { font-size: 3rem; font-weight: 700; line-height: 1; letter-spacing: .06em; margin: 0 0 .3rem; }
+h1 { font-size: 3rem; font-weight: 700; line-height: 1; letter-spacing: .06em; margin: 0 0 .6rem; display: inline-block;
+     background: var(--glass); color: var(--hazard); padding: .2em .45em; border-radius: 6px; box-shadow: 0 0 0 3px var(--edge);
+     text-shadow: 3px 3px 0 var(--ghost); }
 .sub { text-transform: uppercase; letter-spacing: .08em; font-size: .9rem; margin: 0 0 1.2rem; padding-bottom: .8rem;
        border-bottom: 4px solid var(--hazard); }
 h2 { font-size: 1.1rem; font-weight: 400; text-transform: uppercase; letter-spacing: .06em; margin: 2.4rem 0 .6rem;
@@ -78,11 +81,12 @@ code { font-size: .9em; }
 <p class="lede">A self-playing industrial machine, after the records of KMFDM, Nine Inch Nails and Ministry. It
 starts the moment it's switched on and arranges its own songs: intros, verses, builds, choruses, breakdowns and
 drops. You steer it: press a key and the whole machine moves to that root on the next bar; throw in fills,
-breakdowns and drops, mute layers, mutate the riffs.</p>
+breakdowns and drops, mute layers, mutate the riffs. And when you like what it plays, lock the song and write
+it yourself, step by step.</p>
 <div class="shots">
-  <img src="img/screen-verse.png" width="240" height="240" alt="IND-1's screen: the piece Foundry in a verse, the bar's grid of drums, metal, bass, guitar and synth">
-  <img src="img/screen-breakdown.png" width="240" height="240" alt="IND-1's screen: a breakdown">
-  <img src="img/screen-drums.png" width="240" height="240" alt="IND-1's screen: the Drums page">
+  <img src="img/screen-verse.png" width="240" height="240" alt="IND-1's screen: a verse of Foundry, the wanderer walking through the halls under banners and torches, the bar's kicks below">
+  <img src="img/screen-drop.png" width="240" height="240" alt="IND-1's screen: the drop, the wanderer facing the Warden, an iron giant with a furnace for a heart">
+  <img src="img/screen-song.png" width="240" height="240" alt="IND-1's screen: the song editor, ten sections as the quest's places, the chorus picked with its layers">
 </div>
 <nav class="ways" aria-label="Get IND-1">
   <a href="emu/"><strong>Try it in the browser</strong><span>The same code the FM-1 runs, with sound. Mouse, touch or keyboard; no FM-1 needed.</span></a>
@@ -98,12 +102,26 @@ breakdowns and drops, mute layers, mutate the riffs.</p>
   <li><b>Bass.</b> A Pro-1-style mono synth: a saw and a square through a squelching low-pass, driven, in sixteenths, gallops and octaves.</li>
   <li><b>Guitar.</b> Two synthesized guitars, left and right: palm-muted chugs and open power chords through a high-gain amp and a cabinet.</li>
   <li><b>Synth.</b> FM and saw stabs and lines in the spirit of the Xpander and the Prophet VS.</li>
-  <li><b>Metal and noise.</b> Inharmonic clangs on Euclidean patterns; a drone or static under the intros and breakdowns, risers into the drops.</li>
+  <li><b>Metal and noise.</b> Inharmonic clangs on two Euclidean rings; a drone or static under the intros and breakdowns, risers into the drops.</li>
 </ul>
 <p>Eight pieces, from four-on-the-floor EBM to thrash and half-time grind, each remembering how you left it.</p>
+
+<h2>Your songs</h2>
+<p>Each piece's song is three parts (the verse, the chorus, the breakdown), each a bar of every layer with its
+chords, and a plan of sections. Press a page's button again for its editor: the white keys are the steps, the
+black keys the drums or the mode's notes; the song editor lays out the sections, their lengths and the layers in
+each. Any edit locks the song: from then on the machine changes nothing in it by itself, and it plays the same
+way every time. Turn it back to auto and the machine writes on.</p>
+
+<h2>The quest</h2>
+<p>The screen is a dark LCD of the old handheld kind, every segment's ghost behind it. The song is a journey
+through a keep: the gate, the halls, the stair, the battle, the campfire, the Warden, the dawn. The drums swing the
+wanderer's sword, the bass walks, the guitars flare the torches, the synth circles magic, the metal strikes
+sparks, the noise rolls in as mist.</p>
 <p class="small">To go back to the official firmware, use the installer's "Back to the stock firmware", or
 M-VAVE's updater, M-UPGRADE, from <a href="https://www.m-vave.com/download">m-vave.com/download</a>.
-M-VAVE and FM-1 are trademarks of their owners. IND-1 is not affiliated with M-VAVE, KMFDM, Nine Inch Nails or Ministry.</p>
+M-VAVE and FM-1 are trademarks of their owners. IND-1 is not affiliated with M-VAVE, KMFDM, Nine Inch Nails or Ministry;
+its scenes and characters are its own.</p>
 </main>
 </body>
 </html>
@@ -112,8 +130,8 @@ M-VAVE and FM-1 are trademarks of their owners. IND-1 is not affiliated with M-V
 SOURCE = """<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>IND-1 source</title>
-<style>body { background: #121214; color: #e8e4d8; font: 17px/1.6 "Helvetica Neue", Helvetica, Arial, sans-serif; margin: 48px 16px; }
-main { max-width: 42rem; margin: 0 auto; } a { color: #e8e4d8; text-decoration-color: #ff8a18; text-decoration-thickness: 2px; }</style></head>
+<style>body { background: #111012; color: #eae4d8; font: 17px/1.6 "Helvetica Neue", Helvetica, Arial, sans-serif; margin: 48px 16px; }
+main { max-width: 42rem; margin: 0 auto; } a { color: #eae4d8; text-decoration-color: #ff8628; text-decoration-thickness: 2px; }</style></head>
 <body><main><h1>IND-1 source</h1>
 <p>IND-1 is free software under the GNU General Public License, version 3 only. The complete source of v__VERSION__:
 <a href="__TAR__">__TAR__</a>.__REPOLINE__</p>

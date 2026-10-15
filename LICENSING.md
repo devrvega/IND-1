@@ -14,7 +14,8 @@ puts a tarball of the source on the site it makes, next to the firmware).
 | `firmware/src/app/{panel,plat_fm1,main_fm1,project}.c`, `firmware/src/app/ui.c` (its input, knob and drawing code), `host/ind_host.c`, `web/emu/`, `web/ind_installer.html`, `tools/{make_pages,manual_html,gen_manual_figures}.py` | adapted from AMB-1 (itself from X0X, from Felucca's `panel.c`, `main.c`, `audio.c`) | GPL-3.0-only |
 | In `firmware/src/dsp/ind.c`: Dattorro's plate reverb, the command queue, the clock and transport, Bjorklund's algorithm, the hats | from AMB-1 (the plate from [FoMni](https://github.com/charlesvestal/fm1-fomni)) | GPL-3.0-only |
 | The idea of a browser emulator for FM-1 firmware (`web/emu/`) | [Groove OS](https://www.groove-os.com/) by Peter Gombos, whose site runs its firmware in the browser; no code from it | credit only |
-| Everything else in `firmware/src/{app,dsp}`, `tests/` | IND-1 | GPL-3.0-only |
+| `tools/{fm1_status,readme_gif,release_notes}.py`, `tools/get_sdk_files.sh`, `.github/` | IND-1, shared with its sibling LCD-4 | GPL-3.0-only |
+| Everything else in `firmware/src/{app,dsp}` (the songs, the editors, the quest's scenes and art), `tests/` | IND-1 | GPL-3.0-only |
 
 ## Third-party material
 

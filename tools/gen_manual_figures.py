@@ -10,7 +10,7 @@
 From X0X's: the panel layout follows the FM-1: two knob pairs and the octave buttons on the left, the
 screen in the middle, four knobs and two rows of six buttons on the right, and the keys below: 11
 black keys in groups of 3, 2, 3, 2, 1 over 16 white keys (F to G). The words under the controls are in
-IND-1's hazard orange."""
+IND-1's ember orange."""
 import base64
 import io
 import sys
@@ -89,7 +89,7 @@ def panel(screen_png):
     s = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" role="img" '
          f'aria-label="The FM-1 front panel running IND-1, each control labelled with what it does">', STYLE,
          f'<rect x="4" y="4" width="{W - 8}" height="{H - 8}" rx="44" fill="{BODY}"/>',
-         knob(105, 92, 24, "MASTER", "Volume"), knob(215, 92, 24, "SELECT", "Page|HOME + it: tempo"),
+         knob(105, 92, 24, "MASTER", "Volume"), knob(215, 92, 24, "SELECT", "Page; in an editor,|the part · HOME + it: tempo"),
          knob(105, 210, 24, "PRESETS", "Piece"), knob(215, 210, 24, "ALGORITHM", "Mode"),
          f'<rect x="58" y="284" width="210" height="58" rx="14" fill="{TRAY}"/>',
          button(72, 294, 82, 38, "OCT-"), button(170, 294, 82, 38, "OCT+"),
@@ -100,8 +100,10 @@ def panel(screen_png):
         s.append(knob(610 + i * 104, 92, 22, f"KNOB{i + 1}"))
     s.append(what(766, 136, "The page's four values (KNOB1: a layer's level)"))
     s.append(f'<rect x="568" y="146" width="400" height="236" rx="18" fill="{TRAY}"/>')
-    top = [("FX", "Space"), ("SEL", "Metal"), ("ENV", "Guitar"), ("LFO", "Bass"), ("EDIT", "Next|section"), ("GLO", "Setup")]
-    bot = [("HOME", "Machine"), ("SAVE", "Save, hold:|recipe"), ("ARP", "Synth"), ("SEQ", "Drums"),
+    top = [("FX", "Space"), ("SEL", "Metal|again: rings"), ("ENV", "Guitar|+ step: accent"), ("LFO", "Bass|again: notes"),
+           ("EDIT", "Next section|+ step: clear"), ("GLO", "Setup")]
+    bot = [("HOME", "Machine|again: song"), ("SAVE", "Save, hold:|recipe"), ("ARP", "Synth|again: notes"),
+           ("SEQ", "Drums|again: steps"),
            (("PLAY", "STOP"), "Run /|stop"), ("REC", "Breakdown|build, drop")]
     for i in range(6):
         x = 582 + i * 63
@@ -113,8 +115,8 @@ def panel(screen_png):
         if bot[i][1]:
             s.append(what(x + 27, 330, bot[i][1]))
     s.append(keybed(36, 400, W - 72, 270))
-    s.append(what(W / 2, 698, "Every key: the root, on the next bar (lit: the root)   ·   EDIT + a page button: "
-                              "mute that layer   ·   Hold any button a second: what it does"))
+    s.append(what(W / 2, 698, "Keys: the root, on the next bar   ·   in an editor, white: the steps, black: the drum, "
+                              "the note or the layer   ·   EDIT + a page button: mute   ·   hold a button: what it does"))
     s.append("</svg>")
     return "".join(s)
 

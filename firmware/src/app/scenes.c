@@ -325,7 +325,7 @@ static void scene_battle(const scn_t *s)        /* a chorus: the skeletons come;
         pline(16 * k + 8, 18 + (k & 1) * 4, 16 * k + 16, 26);
     }
     pline(0, FEET + 1, 115, FEET + 1);
-    cbox(96, 11, 4, 4, L_PRINT);                 /* the moon */
+    cdisc(98, 13, 3, L_PRINT);                   /* the moon */
     /* the war banner behind the wanderer, flying with the guitar */
     pbox(12, 16, 1, 27);
     art(13, 16, PENNANT[0], (s->cnt[EN_ROW_GUITAR] & 1u) != 0);
