@@ -293,6 +293,7 @@ static void fm1_main(void)
     en_init();
     project_load();                                 /* defaults when nothing (or another format) is saved */
     project_apply();
+    project_song_take();
     audio_init();
     usb_start();
 #if EN_TRS

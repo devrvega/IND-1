@@ -1,0 +1,168 @@
+# the songs: the editors write a piece's song from the keys (and lock it); the song editor lays out its
+# sections; a locked song survives a reboot and a trip to another piece; SAVE held gives it back to the
+# machine
+wait 300
+expect locked 0
+expect editor 0
+# the drums editor (SEQ, then SEQ again), part A, the kick (the first black key)
+tap SEQ
+tap SEQ
+wait 100
+expect editor 2
+turn SELECT -3
+wait 50
+tapkey b0
+wait 50
+shot drums_editor.png
+# an empty step: a kick there, and the song is the player's from now on
+expect dvel_0_0_3 0
+tapkey w3
+wait 50
+expect dvel_0_0_3 92
+expect locked 1
+# a kick there (Foundry's four on the floor): pressed and let go, it goes
+expect dvel_0_0_4 120
+tapkey w4
+wait 50
+expect dvel_0_0_4 0
+# ENV + a step: an accent; ENV's own page waits
+press ENV
+tapkey w3
+wait 50
+release ENV
+wait 50
+expect dvel_0_0_3 120
+expect view 1
+# EDIT + a step: every drum off it (and no next section)
+press EDIT
+tapkey w0
+wait 50
+release EDIT
+wait 50
+expect dvel_0_0_0 0
+expect pending <1
+# the snare; an empty step held, the kick's black key: both there
+tapkey b1
+key w6 down
+wait 40
+tapkey b0
+key w6 up
+wait 50
+expect dvel_0_1_6 92
+expect dvel_0_0_6 92
+
+# from one editor to the next: the bass's. A note (the third degree), on a step made a rest first
+tap LFO
+wait 100
+expect editor 3
+expect view 2
+tapkey b2
+press EDIT
+tapkey w5
+release EDIT
+wait 50
+expect note_0_1_5 -128
+tapkey w5
+wait 50
+expect note_0_1_5 2
+# held, its own knobs: an accent, a slide; a black key: another note
+key w5 down
+wait 40
+turn K2 1
+turn K3 1
+tapkey b7
+key w5 up
+wait 50
+expect note_0_1_5 7
+expect nflag_0_1_5 3
+shot bass_editor.png
+
+# the song editor: down to one section (a verse, two bars), then a chorus of one bar after it
+tap HOME
+wait 100
+expect editor 1
+press EDIT
+tapkey w0
+tapkey w0
+tapkey w0
+tapkey w0
+tapkey w0
+tapkey w0
+tapkey w0
+tapkey w0
+tapkey w0
+tapkey w0
+tapkey w0
+tapkey w0
+tapkey w0
+tapkey w0
+tapkey w0
+release EDIT
+wait 50
+expect plan_n 1
+tapkey w0
+spin K1 -9
+spin K1 1
+spin K2 -40
+spin K2 2
+wait 50
+expect type_0 1
+tapkey w1
+wait 50
+expect plan_n 2
+spin K1 2
+spin K2 -40
+spin K2 1
+wait 50
+expect type_1 3
+expect layers_1 63
+# the black keys: its layers (the noise off)
+tapkey b5
+wait 50
+expect layers_1 31
+shot song_editor.png
+# it plays as laid out: the verse, the chorus, the verse again
+until section 3 12000
+until section 1 6000
+until section 3 6000
+
+# saved, and after a reboot as it was
+tap PLAY
+wait 100
+tap SAVE
+wait 200
+reboot
+wait 400
+expect locked 1
+expect plan_n 2
+expect dvel_0_0_3 120
+expect note_0_1_5 7
+expect layers_1 31
+# another piece (on auto: the machine's), and back: the song as it was left
+turn PRESET 1
+wait 300
+expect piece 1
+expect locked 0
+turn PRESET -1
+wait 300
+expect piece 0
+expect locked 1
+expect plan_n 2
+expect dvel_0_0_3 120
+# the song editor's last knob: auto and locked
+tap HOME
+wait 100
+expect editor 1
+turn K4 -1
+wait 50
+expect locked 0
+turn K4 1
+wait 50
+expect locked 1
+# SAVE held: the recipe, and the song back to the machine
+press SAVE
+wait 1700
+release SAVE
+wait 300
+expect locked 0
+expect plan_n >4

@@ -216,7 +216,11 @@ void en_regrow(void)
     en_song.locked = 0;                          /* the render writes no more of it, and the UI no less */
     post(C_LOADED, 0, 0);
 }
-void en_lock(int on) { en_song.locked = (uint8_t)(on != 0); }
+void en_lock(int on)
+{
+    en_song.locked = (uint8_t)(on != 0);
+    BARRIER();                                   /* before the caller's next write to en_song */
+}
 void en_song_loaded(void) { post(C_LOADED, 0, 0); }
 void en_rebuild(void) { post(C_REBUILD, 0, 0); }
 void en_turned(int p) { post(C_TURNED, p, 0); }
@@ -231,6 +235,7 @@ volatile uint8_t en_step, en_root_now, en_chord_root, en_active, en_muted, en_pe
 volatile uint16_t en_grid[EN_NROW];
 volatile uint8_t en_grid_vel[EN_NROW][EN_NSTEP];
 volatile float en_level[EN_NLAYER], en_glow[EN_NROW];
+volatile uint8_t en_hits[EN_NROW], en_tom;
 volatile uint32_t en_bars;
 
 static int16_t par[P_NPARAMS];
@@ -413,6 +418,7 @@ static void kick_fire(float vel, int boom, int tight)
     kick.click = vel * 0.9f;
     pump_tgt = 1.0f;
     en_glow[EN_ROW_KICK] = 1.0f;
+    en_hits[EN_ROW_KICK]++;
     midi(0x99, 36, (uint32_t)(vel * 127.0f));
     midi(0x89, 36, 0);
 }
@@ -430,6 +436,8 @@ static void tom_fire(float vel, int k)          /* k: 0 high, 1 mid, 2 low */
     tom.adec = t60(0.55f);
     tom.click = vel * 0.25f;
     en_glow[EN_ROW_SNARE] = 1.0f;
+    en_hits[EN_ROW_SNARE]++;
+    en_tom = 1;
     midi(0x99, GM[k], (uint32_t)(vel * 127.0f));
     midi(0x89, GM[k], 0);
 }
@@ -450,6 +458,8 @@ static void snare_fire(float vel)
     gate_hold = (int32_t)GATE_HOLD;
     since_snare = 0;
     en_glow[EN_ROW_SNARE] = 1.0f;
+    en_hits[EN_ROW_SNARE]++;
+    en_tom = 0;
     midi(0x99, snare.clap ? 39 : 38, (uint32_t)(vel * 127.0f));
     midi(0x89, snare.clap ? 39 : 38, 0);
 }
@@ -466,6 +476,7 @@ static void hat_fire(int kind, float vel)       /* 0 closed, 1 open, 2 crash */
     if (!kind && hat_o.on && hat_o.hf > 0.8f)
         hat_o.adec = t60(0.02f);                /* the closed chokes the open (not the crash) */
     en_glow[EN_ROW_HAT] = 1.0f;
+    en_hits[EN_ROW_HAT]++;
     midi(0x99, GM[kind], (uint32_t)(vel * 110.0f));
     midi(0x89, GM[kind], 0);
 }
@@ -636,6 +647,7 @@ static void bass_play(int n, uint8_t fl, int32_t len)
         midi(0x91, (uint32_t)n, (fl & 1u) ? 110u : 85u);
     bass.midi_note = (uint8_t)n;
     en_glow[EN_ROW_BASS] = 1.0f;
+    en_hits[EN_ROW_BASS]++;
 }
 
 static void render_bass(uint32_t n)
@@ -753,6 +765,7 @@ static void gtr_play(int n, uint8_t fl, float vel)
     }
     midi(0x92, (uint32_t)n, (uint32_t)(vel * 120.0f));
     en_glow[EN_ROW_GUITAR] = 1.0f;
+    en_hits[EN_ROW_GUITAR]++;
 }
 
 /* samples j0..j1 of one guitar */
@@ -1017,6 +1030,7 @@ static void metal_hit(int kind, float vel)
     v->gl = fm_cosf(p);
     v->gr = fm_sinf(p);
     en_glow[EN_ROW_METAL] = 1.0f;
+    en_hits[EN_ROW_METAL]++;
     midi(0x99, kind ? 54u : 56u, (uint32_t)(vel * 110.0f));
     midi(0x89, kind ? 54u : 56u, 0);
 }
@@ -1532,6 +1546,8 @@ static uint8_t pick_layers(int s, int dice)
         a |= 1u << LY_NOISE;
     return a;
 }
+
+uint8_t en_layers_for(int s) { return pick_layers((unsigned)s < EN_NSECT ? s : S_VERSE, 0); }
 
 static void plan_song(void)
 {
@@ -2147,6 +2163,7 @@ static void syn_note(int deg, uint8_t f, int s)
                       (f & F_LONG) != 0);
     }
     en_glow[EN_ROW_SYNTH] = 1.0f;
+    en_hits[EN_ROW_SYNTH]++;
 }
 
 static void play_step(int s)

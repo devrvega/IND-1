@@ -22,7 +22,8 @@
  *                                (WHAT: playing view piece dirty store_writes clocks_out sixteenths ext
  *                                midi_out section sectbar sectlen step root root_now chord_root active
  *                                muted pending song planpos jumped parN levelN (layer N, 0..100)
- *                                gridN (row N's hits as a mask) peak_db_max peak_db_min)
+ *                                gridN (row N's hits as a mask) peak_db_max peak_db_min; the song:
+ *                                locked editor plan_n type_I layers_I dvel_P_R_S note_P_L_S nflag_P_L_S)
  *   until WHAT VALUE [MS]        run until the expectation holds (at most MS, default 20000), then check
  *   reboot                       re-run boot from the simulated flash (persistence test)
  *   storeamb                     write a project as AMB-1 left it (another magic): IND-1 must ignore it
@@ -112,7 +113,7 @@ void en_midi_out(uint32_t st, uint32_t d1, uint32_t d2) { plat_midi_out(st >> 4 
 
 /* flash: one buffer per object, kept across a simulated reboot */
 static uint8_t store[OBJ_NOBJ][PLAT_STORE_MAX];
-static int store_len[OBJ_NOBJ] = {-1, -1};
+static int store_len[OBJ_NOBJ] = {-1, -1, -1, -1};
 static uint32_t store_writes;
 int plat_store_load(uint32_t obj, void *dst, uint32_t max)
 {
@@ -279,6 +280,7 @@ static void boot(void)
     en_init();
     project_load();
     project_apply();
+    project_song_take();
     lcd_fill(0, 0, 240, 240, 0);
     ui_init();
 }
@@ -397,7 +399,28 @@ static int expect(const char *what, const char *val)
         got = en_plan_pos;
     else if (!strcmp(what, "jumped"))
         got = en_jumped;
-    else if (!strncmp(what, "level", 5))          /* levelN: layer N's meter, 0..100 */
+    else if (!strcmp(what, "locked"))             /* the song: 1 locked, 0 auto */
+        got = en_song.locked;
+    else if (!strcmp(what, "editor"))             /* the editor open (ui.c E_*), 0 none */
+        got = editor();
+    else if (!strcmp(what, "plan_n"))             /* the song's sections */
+        got = en_song.plan_n;
+    else if (!strncmp(what, "type_", 5))          /* type_I: section I's kind (S_*) */
+        got = en_song.plan[atoi(what + 5) % EN_PLAN_MAX].type;
+    else if (!strncmp(what, "layers_", 7))        /* layers_I: section I's layers */
+        got = en_song.plan[atoi(what + 7) % EN_PLAN_MAX].layers;
+    else if (!strncmp(what, "dvel_", 5)) {        /* dvel_P_R_S: part P's drum row R (ui.c R_*) at step S */
+        int p = 0, r = 0, st = 0;
+        sscanf(what + 5, "%d_%d_%d", &p, &r, &st);
+        got = drum_get(&en_song.part[p % EN_NPARTS], r % NDROW, st & 15);
+    } else if (!strncmp(what, "note_", 5) || !strncmp(what, "nflag_", 6)) {   /* note_P_L_S: part P's layer L step S */
+        int p = 0, l = 0, st = 0, fl = what[1] == 'f';
+        const en_note_t *n;
+        sscanf(what + (fl ? 6 : 5), "%d_%d_%d", &p, &l, &st);
+        n = l == LY_BASS ? en_song.part[p % EN_NPARTS].bass : l == LY_GUITAR ? en_song.part[p % EN_NPARTS].gtr
+                                                                               : en_song.part[p % EN_NPARTS].syn;
+        got = fl ? n[st & 15].f : n[st & 15].n;
+    } else if (!strncmp(what, "level", 5))        /* levelN: layer N's meter, 0..100 */
         got = (int)(en_level[atoi(what + 5) % EN_NLAYER] * 100.0f);
     else if (!strncmp(what, "grid", 4))           /* gridN: row N's hits this bar */
         got = en_grid[atoi(what + 4) % EN_NROW];

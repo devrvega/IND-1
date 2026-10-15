@@ -183,6 +183,8 @@ extern volatile uint16_t en_grid[EN_NROW];     /* the bar's hits, bit s = step s
 extern volatile uint8_t en_grid_vel[EN_NROW][EN_NSTEP];   /* and how hard (0..127) */
 extern volatile float en_level[EN_NLAYER];     /* each layer's loudness now, 0..1 (meters) */
 extern volatile float en_glow[EN_NROW];        /* 0..1: a row just played */
+extern volatile uint8_t en_hits[EN_NROW];      /* each row's notes, counted (mod 256): the screen times them */
+extern volatile uint8_t en_tom;                /* the last drum hit was a tom (and not the snare) */
 extern volatile uint32_t en_bars;              /* sixteenths played since start (for tests) */
 
 /* the pure parts, for the tests and the screen */
@@ -190,6 +192,7 @@ uint32_t en_euclid(int k, int n, int rot);     /* Bjorklund's pattern, as a bitm
 int en_scale(uint32_t pool, int *steps);       /* the pool's pitch classes (relative), ascending; count */
 int en_degree(uint32_t pool, int deg);         /* scale degree deg (any integer) in semitones from the root */
 int en_sect_bars(int sect, int arrange);       /* a section's length at an Arrange setting (0: loops) */
+uint8_t en_layers_for(int sect);               /* the layers a section mostly has (at the Intensity now) */
 
 /* the pieces: recipes for every parameter (Tune and MIDI out included, but they are the player's) */
 #define EN_NPIECES 8

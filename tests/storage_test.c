@@ -30,7 +30,7 @@ static int st_prog(uint32_t off, const void *src, uint32_t n)
 }
 #include "../firmware/src/app/plat.h"     /* IND-1: the object map */
 #include "../firmware/src/storage.c"
-#define OBJ_PROJECT0 OBJ_PROJ                  /* IND-1 has two objects: the project and the panel */
+#define OBJ_PROJECT0 OBJ_PROJ                  /* IND-1: the project, the panel, two song banks */
 #define OBJ_SETTINGS OBJ_PANEL
 
 static int check(const char *what, int ok)

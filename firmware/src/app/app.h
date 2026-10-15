@@ -11,7 +11,10 @@
 #endif
 #define PROJ_MAGIC 0x31444E49u           /* "IND1" (AMB-1's, at the same place in flash, is "ENO1") */
 #define PROJ_FORMAT 1u
+#define BANK_MAGIC 0x53314E49u           /* "IN1S": four pieces' songs */
+#define BANK_FORMAT 1u
 #define NPIECES EN_NPIECES
+#define BANK_SONGS 4                     /* songs a flash object */
 
 typedef struct {
     int16_t par[P_NPARAMS];
@@ -36,6 +39,8 @@ void project_apply(void);                /* every value to the engine (boot, loa
 const char *piece_name(int i);
 void project_piece(int i);               /* the playing piece kept, piece i taken up as it was left */
 void project_piece_reset(void);          /* the playing piece back to its recipe */
+void project_song_take(void);            /* the piece's song into play (en_song): locked as it was left, on
+                                            auto written anew */
 
 void ui_init(void);
 void ui_frame(void);
