@@ -29,6 +29,9 @@
  *   storeamb                     write a project as AMB-1 left it (another magic): IND-1 must ignore it
  */
 #define EN_HOST 1
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L          /* clock_gettime, with -std=c99 on Linux */
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
