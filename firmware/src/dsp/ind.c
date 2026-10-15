@@ -236,6 +236,17 @@ volatile uint16_t en_grid[EN_NROW];
 volatile uint8_t en_grid_vel[EN_NROW][EN_NSTEP];
 volatile float en_level[EN_NLAYER], en_glow[EN_NROW];
 volatile uint8_t en_hits[EN_NROW], en_tom;
+uint32_t (*en_time)(void);
+volatile uint32_t en_prof[PR_N];
+static uint32_t prof_t;
+static inline void prof(int k)                  /* the time since the last mark, to part k */
+{
+    if (en_time) {
+        uint32_t t = en_time();
+        en_prof[k] += t - prof_t;
+        prof_t = t;
+    }
+}
 volatile uint32_t en_bars;
 
 static int16_t par[P_NPARAMS];
@@ -2311,25 +2322,27 @@ static void loaded(void)
 /* the grid: one call a sixteenth (MIDI clock: 6 ticks) */
 static void bar_start(void)
 {
+    const int top = pend_top;
+    if (top) {                                   /* a new song: from its top (a jump asked for since comes after) */
+        song_top();
+        pend_top = 0;
+    }
     if (!bar_fresh) {
-        sect_bar++;
+        if (!top)
+            sect_bar++;
         if (pend_kind) {
             if (pend_kind == 2)
                 sect_break();
             else
                 sect_next();
             pend_kind = 0;
-        } else if (sect_len && sect_bar >= sect_len) {
+        } else if (!top && sect_len && sect_bar >= sect_len) {
             sect_next();
-        } else if ((sect_bar & 3) == 0 && !en_song.locked) {
+        } else if (!top && (sect_bar & 3) == 0 && !en_song.locked) {
             evolve_step();
         }
     }
     bar_fresh = 0;
-    if (pend_top) {
-        song_top();
-        pend_top = 0;
-    }
     if (pend_mutate) {
         mutate();
         pend_mutate = 0;
@@ -2682,12 +2695,19 @@ static void render_chunk(int32_t *out, uint32_t n, float gain)
     const float rg = rev_send, dg = dly_send, ga = gate_amt, pa = pump_amt;
     for (j = 0; j < n; j++)
         mixl[j] = mixr[j] = drum[j] = rsend[j] = dsend[j] = 0.0f;
+    prof(PR_OTHER);
     render_drums(n);
+    prof(PR_DRUMS);
     render_bass(n);
+    prof(PR_BASS);
     render_guitar(n);
+    prof(PR_GUITAR);
     render_synth(n);
+    prof(PR_SYNTH);
     render_metal(n);
+    prof(PR_METAL);
     render_noise(n);
+    prof(PR_NOISE);
     for (j = 0; j < n; j++) {
         float wl, wr, l, r, el, er, duck, rgate;
         if (gate_hold > 0)
@@ -2707,6 +2727,7 @@ static void render_chunk(int32_t *out, uint32_t n, float gain)
         out[2 * j + 1] = (int32_t)(fm_tanhf(r * 0.5f * gain) * 8300000.0f);
     }
     since_snare += (int32_t)n;
+    prof(PR_SPACE);
 }
 
 static void control(uint32_t n)                 /* once a chunk: the slow things */
@@ -2742,7 +2763,10 @@ static void control(uint32_t n)                 /* once a chunk: the slow things
 void en_render(int32_t *out, uint32_t n, uint32_t gain_q12)
 {
     const float gain = (float)gain_q12 * (1.0f / 4096.0f) * 2.0f;
+    if (en_time)
+        prof_t = en_time();
     drain();
+    prof(PR_SEQ);
     if (en_ext && ++ext_age > 100u)
         en_ext = 0;
     while (n) {
@@ -2752,6 +2776,7 @@ void en_render(int32_t *out, uint32_t n, uint32_t gain_q12)
             if (pulse_left <= 0.0f) {
                 clock_pulse();
                 pulse_left += step_len * (1.0f / 6.0f);
+                prof(PR_SEQ);
             }
             if ((float)k > pulse_left)
                 k = (uint32_t)pulse_left + 1u;

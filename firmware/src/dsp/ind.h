@@ -156,6 +156,12 @@ void en_clock(int msg);
 /* the render (audio ISR): n stereo frames, 24-bit in int32; gain Q12 (the MASTER pot) */
 void en_render(int32_t *out_lr, uint32_t n, uint32_t gain_q12);
 
+/* where the render's time goes (the device's SysEx status reports it): en_time, when set, is a clock;
+ * en_prof[k] sums its ticks in each part */
+enum { PR_SEQ, PR_DRUMS, PR_BASS, PR_GUITAR, PR_SYNTH, PR_METAL, PR_NOISE, PR_SPACE, PR_OTHER, PR_N };
+extern uint32_t (*en_time)(void);
+extern volatile uint32_t en_prof[PR_N];
+
 /* MIDI out, from the render: the app sends it (USB); status, data 1, data 2 */
 void en_midi_out(uint32_t st, uint32_t d1, uint32_t d2);
 

@@ -89,7 +89,7 @@ mode. If the FM-1 no longer starts but reaches the chip's update mode (4C4A:8057
 
 ## Publishing a release
 
-1. `./build.sh --release X.Y` (the identity, FM-1_6XXYYZZ, is what the installer checks; AMB-1's is
+1. `./build.sh --release X.Y` (the identity, FM-1_5XXYYZZ, is what the installer checks; AMB-1's is
    FM-1_7..., X0X's FM-1_9...).
 2. `web/emu/build.sh` (needs Emscripten) for the browser emulator.
 3. `[IND_REPO=https://...] python3 tools/make_pages.py build/ind-X.Y.fwsc X.Y OUT_DIR`: the site (landing

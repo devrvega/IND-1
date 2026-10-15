@@ -633,7 +633,13 @@ static void ep1_rx(void)
     for (i = 0; i + 3u < n; i += 4u) {
         uint32_t cin = ep1rx[i] & 15u, pkt = (uint32_t)ep1rx[i] | (uint32_t)ep1rx[i + 1] << 8 |
                                             (uint32_t)ep1rx[i + 2] << 16 | (uint32_t)ep1rx[i + 3] << 24;
-        if (cin >= 4u && cin <= 7u) {                   /* SysEx */
+        if ((cin == 0x5u || cin == 0xFu) && ep1rx[i + 1] >= 0xF8u) {   /* IND-1: real time, either way it comes */
+            if (mi_w - mi_r < MQ) {                     /* (a host may send it as CIN 5, a one-byte message) */
+                midi_in_q[mi_w % MQ] = (pkt & ~15u) | 0xFu;
+                RING_PUBLISH();
+                mi_w++;
+            }
+        } else if (cin >= 4u && cin <= 7u) {            /* SysEx */
             uint32_t k, nb = cin == 4u || cin == 7u ? 3u : cin == 6u ? 2u : 1u;
             for (k = 0; k < nb; k++)
                 sysex_byte(ep1rx[i + 1 + k]);

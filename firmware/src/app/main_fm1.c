@@ -82,6 +82,124 @@ static void audio_silence(void)                     /* IRQs off (flash erase): t
         abuf[i] = 0;
 }
 
+/* IND-1's SysEx (F0 7D 49 31 cmd .. F7, 7D the non-commercial ID), all of it read-only: 01 asks for the
+ * audio load (the reply is F0 7D 49 31 01, then cpu %, the worst render in us, renders late, renders, 0,
+ * the time each part of the engine took (ind.h PR_*), the clock, playing / external / locked, sixteenths,
+ * MIDI messages in, each as five 7-bit groups, F7); 03 restarts the worst, the late and the parts' times;
+ * 04 s: the screen not drawn for s seconds; 05 the store (each object's length in flash, its last save,
+ * what is in it); 07 what plays (each row's notes counted, the section, the plan, the piece). */
+static void dev_put(uint8_t *b, uint32_t v)
+{
+    uint32_t k;
+    for (k = 0; k < 5u; k++)
+        b[k] = (uint8_t)((v >> (7u * k)) & 0x7Fu);
+}
+static uint32_t dev_ticks(void) { return fm1_ticks(); }
+static uint32_t ui_pause_until;                     /* SysEx 04: the screen not drawn, to see what it costs the audio */
+static void dev_head(uint8_t *r, uint8_t cmd)
+{
+    r[0] = 0xF0;
+    r[1] = 0x7D;
+    r[2] = 0x49;
+    r[3] = 0x31;
+    r[4] = cmd;
+}
+static void dev_sysex(void)
+{
+    const uint8_t *p;
+    uint32_t n;
+    if (!ota_frame_get(&p, &n) || n < 4u || p[0] != 0x7Du || p[1] != 0x49u || p[2] != 0x31u)
+        return;                                     /* not ours: left for the updater */
+    switch (p[3]) {
+    case 1: {
+        static uint8_t r[6 + 25 + 5 * PR_N + 25 + 1];
+        uint32_t k, c0, t0, mhz;
+        dev_head(r, 1);
+        dev_put(r + 5, (en_dbg.cpu_q8 * 100u) >> 8);
+        dev_put(r + 10, en_dbg.max_us);
+        dev_put(r + 15, en_dbg.late);
+        dev_put(r + 20, en_dbg.halves);
+        dev_put(r + 25, 0u);
+        for (k = 0; k < PR_N; k++)
+            dev_put(r + 30 + 5 * k, en_prof[k]);
+        c0 = fm1_perf_cycles();                     /* the core's clock: its cycles over 200 us */
+        t0 = fm1_ticks();
+        while ((uint32_t)(fm1_ticks() - t0) < 200u * FM1_TICKS_PER_US)
+            ;
+        mhz = (fm1_perf_cycles() - c0) / 200u;
+        dev_put(r + 30 + 5 * PR_N, mhz);
+        dev_put(r + 35 + 5 * PR_N, en_dbg.halves);
+        dev_put(r + 40 + 5 * PR_N, (uint32_t)en_playing | (uint32_t)en_ext << 1 | (uint32_t)en_song.locked << 2);
+        dev_put(r + 45 + 5 * PR_N, en_bars);
+        dev_put(r + 50 + 5 * PR_N, midi_rx_count);
+        r[55 + 5 * PR_N] = 0xF7;
+        ota_frame_done();
+        ota_wire_send(r, 56 + 5 * PR_N);
+        return;
+    }
+    case 3: {
+        uint32_t k;
+        en_dbg.max_us = 0;
+        en_dbg.late = 0;
+        for (k = 0; k < PR_N; k++)
+            en_prof[k] = 0;
+        en_time = dev_ticks;
+        break;
+    }
+    case 4:
+        ui_pause_until = fm1_ms + 1000u * (n >= 5u ? p[4] : 5u);
+        break;
+    case 5: {                                       /* the store: each object's length in flash, its last save */
+        static uint8_t r[6 + 15 * OBJ_NOBJ + 1];
+        static uint8_t tmp[PLAT_STORE_MAX];
+        uint32_t k;
+        dev_head(r, 5);
+        ota_frame_done();
+        for (k = 0; k < OBJ_NOBJ; k++) {
+            int len = plat_store_load(k, tmp, sizeof tmp);
+            uint32_t info = 0;
+            if (k == OBJ_PROJ && len == (int)sizeof(project_t)) {
+                const project_t *pp = (const project_t *)(const void *)tmp;
+                info = (uint32_t)pp->par[P_TEMPO] | (uint32_t)pp->piece << 10 |
+                       (uint32_t)(pp->magic == PROJ_MAGIC && pp->format == PROJ_FORMAT) << 20;
+            } else if (k >= OBJ_SONG0 && len > 8) {
+                const uint32_t *hd = (const uint32_t *)(const void *)tmp;
+                const en_song_t *sg = (const en_song_t *)(const void *)(tmp + 8);
+                uint32_t q;
+                for (q = 0; q < BANK_SONGS && 8u + (q + 1u) * sizeof(en_song_t) <= (uint32_t)len; q++)
+                    info |= (uint32_t)en_song_valid(&sg[q]) << q | (uint32_t)(sg[q].locked != 0) << (q + 4);
+                info |= (uint32_t)(hd[0] == BANK_MAGIC) << 20;
+            }
+            dev_put(r + 5 + 15 * k, (uint32_t)(len + 100));
+            dev_put(r + 10 + 15 * k, (uint32_t)(store_rc[k] + 100));
+            dev_put(r + 15 + 15 * k, info);
+        }
+        r[5 + 15 * OBJ_NOBJ] = 0xF7;
+        ota_wire_send(r, 6 + 15 * OBJ_NOBJ);
+        return;
+    }
+    case 7: {                                       /* what plays */
+        static uint8_t r[6 + 5 * 12 + 1];
+        uint32_t k;
+        dev_head(r, 7);
+        ota_frame_done();
+        for (k = 0; k < EN_NROW; k++)
+            dev_put(r + 5 + 5 * k, en_hits[k]);
+        dev_put(r + 40, (uint32_t)en_sect | (uint32_t)en_sect_bar << 8 | (uint32_t)en_sect_len << 16);
+        dev_put(r + 45, (uint32_t)en_plan_pos | (uint32_t)en_plan_n << 8 | (uint32_t)en_jumped << 16 | (uint32_t)en_part << 20);
+        dev_put(r + 50, (uint32_t)proj.par[P_TEMPO] | (uint32_t)proj.par[P_ROOT] << 8 | (uint32_t)proj.par[P_MODE] << 12 |
+                            (uint32_t)en_song.locked << 16 | (uint32_t)proj.piece << 20);
+        dev_put(r + 55, (uint32_t)en_step | (uint32_t)en_active << 8 | (uint32_t)en_muted << 16);
+        dev_put(r + 60, en_songs);
+        r[5 + 5 * 12] = 0xF7;
+        ota_wire_send(r, 6 + 5 * 12);
+        return;
+    }
+    default: break;
+    }
+    ota_frame_done();
+}
+
 /* ------------------------------------------------------------ timer --- */
 static uint8_t usb_due;
 void fm1_timer5_irq(void)
@@ -228,26 +346,22 @@ static void safe_main(void)
     }
 }
 
-static void splash(void)
+static void splash(void)                            /* the dark LCD: the name in embers, its ghost behind it */
 {
-    int32_t x;
-    lcd_fill(0, 0, 240, 240, RGB(14, 14, 16));      /* a factory at night: black, hazard stripes */
-    cv_begin(240, 12, RGB(14, 14, 16));
-    for (x = -12; x < 240; x += 16) {
-        int32_t j;
-        for (j = 0; j < 12; j++)
-            cv_rect(x + j, j, 8, 1, RGB(255, 138, 24));
-    }
-    cv_blit(0, 66);
-    cv_blit(0, 162);
-    cv_begin(240, 64, RGB(14, 14, 16));
+    lcd_fill(0, 0, 240, 240, RGB(17, 16, 18));
+    cv_begin(240, 120, RGB(17, 16, 18));
+    cv_rect(14, 8, 212, 104, RGB(60, 45, 36));
+    cv_rect(16, 10, 208, 100, RGB(12, 9, 8));
     {
         int32_t w = text_w(&FONT_L, "IND-1");
-        cv_text((240 - w) / 2, 0, &FONT_L, "IND-1", RGB(232, 228, 216));
-        w = text_w(&FONT_S, "An industrial machine for the FM-1");
-        cv_text((240 - w) / 2, 42, &FONT_S, "An industrial machine for the FM-1", RGB(255, 138, 24));
+        cv_text((240 - w) / 2 + 2, 26, &FONT_L, "IND-1", RGB(40, 24, 15));   /* its ghost, a little off */
+        cv_text((240 - w) / 2, 24, &FONT_L, "IND-1", RGB(255, 134, 40));
+        w = text_w(&FONT_S, "An industrial machine");
+        cv_text((240 - w) / 2, 66, &FONT_S, "An industrial machine", RGB(168, 80, 28));
+        w = text_w(&FONT_XS, "v" EN_VERSION);
+        cv_text((240 - w) / 2, 86, &FONT_XS, "v" EN_VERSION, RGB(168, 80, 28));
     }
-    cv_blit(0, 88);
+    cv_blit(0, 40);
     lcd_sync();
 }
 
@@ -294,6 +408,7 @@ static void fm1_main(void)
     project_load();                                 /* defaults when nothing (or another format) is saved */
     project_apply();
     project_song_take();
+    en_time = dev_ticks;                            /* the engine times itself: the load over SysEx */
     audio_init();
     usb_start();
 #if EN_TRS
@@ -345,6 +460,7 @@ static void fm1_main(void)
                 enter_uboot("UBOOT");
             }
         }
+        dev_sysex();                                /* IND-1's own: the audio load, asked over USB */
         ota_service();                              /* M-UPGRADE handshake (other SysEx is dropped) */
         if (usb.ota_req) {
             usb.ota_req = 0;
@@ -359,7 +475,7 @@ static void fm1_main(void)
 #if EN_CDC
         cdc_task();
 #endif
-        if (fm1_ms - last_frame >= 16u) {           /* ~60 frames/s at most; input in between */
+        if (fm1_ms - last_frame >= 16u && (int32_t)(fm1_ms - ui_pause_until) >= 0) {   /* ~60 frames/s at most */
             last_frame = fm1_ms;
             en_dbg.ui_frames++;
             ui_frame();

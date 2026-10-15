@@ -275,9 +275,12 @@ static double now_ns(void)
     return (double)t.tv_sec * 1e9 + (double)t.tv_nsec;
 }
 
+static uint32_t host_ticks(void) { return (uint32_t)(uint64_t)(now_ns() * 0.024); }   /* 24 a microsecond, as the FM-1's */
+static uint32_t prof_renders;
 static void boot(void)
 {
     en_init();
+    en_time = host_ticks;
     project_load();
     project_apply();
     project_song_take();
@@ -294,6 +297,7 @@ static void run_ms(uint32_t ms)
         while (audio_due_ms <= (double)now_ms) {      /* 256-frame blocks, as the device renders them */
             double t0 = now_ns(), dt;
             en_render(blk, 256, master);
+            prof_renders++;
 #ifdef EN_WEB
             web_audio(blk, 256);
 #endif
@@ -561,6 +565,23 @@ int main(int argc, char **argv)
             wav_close();
         else if (!strcmp(cmd, "peakreset"))
             peak_out = 0.0f;
+        else if (!strcmp(cmd, "profreset")) {     /* where the render's time goes, from now (host time) */
+            int k;
+            for (k = 0; k < PR_N; k++)
+                en_prof[k] = 0;
+            prof_renders = 0;
+        } else if (!strcmp(cmd, "prof")) {
+            static const char *const PN[PR_N] = {"seq", "drums", "bass", "guitar", "synth", "metal", "noise", "space", "rest"};
+            int k;
+            double tot = 0.0;
+            printf("prof (host us a render):");
+            for (k = 0; k < PR_N; k++) {
+                double us = (double)en_prof[k] / 24.0 / (prof_renders ? prof_renders : 1);
+                tot += us;
+                printf(" %s %.2f", PN[k], us);
+            }
+            printf(" = %.2f\n", tot);
+        }
         else if (!strcmp(cmd, "shot")) {
             snprintf(out, sizeof out, "%s/%s", dir, a);
             png_write(out);

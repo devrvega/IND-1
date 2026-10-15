@@ -14,7 +14,7 @@
 
   [IND_REPO=https://...] tools/make_pages.py build/ind-0.1.fwsc 0.1 OUT_DIR
 
-The package must be a release build (./build.sh --release X.Y): its identity, FM-1_6XXYYZZ, is what
+The package must be a release build (./build.sh --release X.Y): its identity, FM-1_5XXYYZZ, is what
 the installer checks the download against and what the FM-1 reports after the install."""
 import html
 import json
@@ -137,7 +137,7 @@ def main(pkg, version, out):
     pkg, out = Path(pkg), Path(out)
     raw = pkg.read_bytes()
     product = product_of(raw)
-    if not re.fullmatch(r"FM-1_6\d{6}", product):
+    if not re.fullmatch(r"FM-1_5\d{6}", product):
         raise SystemExit(f"{pkg}: identity {product!r}: make a release build (./build.sh --release X.Y)")
     if b"FELUCCA-LOADER-1" not in raw:
         raise SystemExit(f"{pkg}: no update loader in it")
