@@ -22,11 +22,10 @@ static int fails;
 static uint32_t midi_count, midi_drum, midi_bass, midi_gtr, midi_syn;
 void en_midi_out(uint32_t st, uint32_t d1, uint32_t d2)
 {
-    (void)d1;
     midi_count++;
     if ((st & 0xF0u) == 0x90u && d2) {
         uint32_t ch = st & 15u;
-        midi_drum += ch == 9u;
+        midi_drum += ch == 9u && d1 != 54u && d1 != 56u;   /* the metal's clangs share the drums' channel */
         midi_bass += ch == 1u;
         midi_gtr += ch == 2u;
         midi_syn += ch == 0u;
@@ -164,7 +163,7 @@ int main(void)
     /* a whole song: the arranger plays its plan through, a new song after it */
     {
         int seen = 0, k;
-        uint16_t song0 = en_song;
+        uint16_t song0 = en_songs;
         en_set(P_ARRANGE, A_SHORT);
         en_set(P_TEMPO, 180);
         for (k = 0; k < 4 * 60; k++) {
@@ -172,7 +171,7 @@ int main(void)
             seen |= 1 << en_sect;
         }
         CHECK(seen == (1 << EN_NSECT) - 1, "every section heard in four minutes (seen %x)", seen);
-        CHECK(en_song != song0, "a new song began");
+        CHECK(en_songs != song0, "a new song began");
         CHECK(!bad && peak < 0.995f, "bounded through a song (peak %f)", (double)peak);
     }
 
@@ -346,6 +345,160 @@ int main(void)
         run(25.0f);
         printf("  %-10s peak %.3f, rms %.4f (%s)\n", en_piece_name(i), (double)peak, (double)rms(), EN_SECT_NAME[en_sect]);
         CHECK(!bad && peak < 0.995f && rms() > 0.02f, "piece %s: peak %f rms %f", en_piece_name(i), (double)peak, (double)rms());
+    }
+
+    /* the song: valid as the machine writes it, and as an empty one */
+    {
+        en_song_t e;
+        en_song_defaults(&e);
+        CHECK(en_song_valid(&e), "an empty song is valid");
+        CHECK(en_song_valid(&en_song), "the machine's song is valid");
+        e.plan_n = 0;
+        CHECK(!en_song_valid(&e), "a song of no sections is not");
+        en_song_defaults(&e);
+        e.part[1].bass[3].n = 40;
+        CHECK(!en_song_valid(&e), "a note out of range is not");
+        en_song_defaults(&e);
+        e.ring_hits[1] = 13;
+        CHECK(!en_song_valid(&e), "more hits than steps is not");
+        CHECK(en_part_of(S_INTRO) == 0 && en_part_of(S_BUILD) == 0 && en_part_of(S_OUTRO) == 0 && en_part_of(S_VERSE) == 0,
+              "A: the verse, the intro, the build, the outro");
+        CHECK(en_part_of(S_CHORUS) == 1 && en_part_of(S_DROP) == 1 && en_part_of(S_BREAK) == 2, "B the chorus, the drop; C the breakdown");
+    }
+
+    /* auto: the machine changes the song by itself as it plays */
+    {
+        en_song_t a;
+        en_regrow();
+        en_set(P_EVOLVE, 100);
+        en_set(P_ARRANGE, A_SHORT);
+        run(0.1f);
+        CHECK(!en_song.locked, "regrow: auto");
+        memcpy(&a, &en_song, sizeof a);
+        run(60.0f);
+        CHECK(memcmp(&a, &en_song, sizeof a) != 0, "on auto, the song moved");
+    }
+
+    /* locked: nothing changes by itself, and the song plays the same way every time from the top */
+    {
+        static uint8_t g1[48][EN_NROW][EN_NSTEP], g2[48][EN_NROW][EN_NSTEP];
+        uint8_t sec1[48], sec2[48];
+        en_song_t a;
+        int pass, k;
+        en_set(P_ARRANGE, A_SHORT);
+        en_lock(1);
+        run(0.1f);
+        memcpy(&a, &en_song, sizeof a);
+        for (pass = 0; pass < 2; pass++) {
+            uint8_t (*g)[EN_NROW][EN_NSTEP] = pass ? g2 : g1;
+            uint8_t *sec = pass ? sec2 : sec1;
+            uint32_t b0;
+            en_play(0);
+            run(0.05f);
+            en_song_loaded();                    /* from the top */
+            run(0.05f);
+            en_play(1);
+            run(0.01f);
+            b0 = en_bars;
+            for (k = 0; k < 48; k++) {
+                while ((en_bars - b0) / 16u < (uint32_t)k)
+                    run(0.01f);
+                memcpy(g[k], (const void *)en_grid_vel, sizeof g[k]);
+                sec[k] = en_sect;
+            }
+        }
+        CHECK(!memcmp(g1, g2, sizeof g1) && !memcmp(sec1, sec2, sizeof sec1), "locked: every bar the same, twice");
+        CHECK(!memcmp(&a, &en_song, sizeof a), "locked: the song as it was");
+    }
+
+    /* the player's song: two sections, edits heard at once, the layers of each */
+    {
+        int k, saw_v = 0, saw_c = 0, wrong = 0;
+        en_play(0);
+        run(0.1f);
+        en_lock(1);
+        en_song.plan_n = 2;
+        en_song.plan[0].type = S_VERSE;
+        en_song.plan[0].bars = 2;
+        en_song.plan[0].layers = 1u << LY_DRUMS | 1u << LY_BASS;
+        en_song.plan[0].tex = EN_TEX_KNOB;
+        en_song.plan[1].type = S_CHORUS;
+        en_song.plan[1].bars = 1;
+        en_song.plan[1].layers = 1u << LY_DRUMS | 1u << LY_GUITAR | 1u << LY_NOISE;
+        en_song.plan[1].tex = EN_TEX_STATIC;
+        for (k = 0; k < EN_NSTEP; k++)
+            en_song.part[0].kick[k] = 0;
+        en_song.part[0].kick[3] = EN_VEL_ACC;
+        en_song_loaded();
+        run(0.05f);
+        CHECK(en_sect == S_VERSE && en_plan_n == 2 && en_plan_len[0] == 2 && en_plan_len[1] == 1, "the plan: %s, %d sections",
+              EN_SECT_NAME[en_sect], en_plan_n);
+        CHECK(en_grid[EN_ROW_KICK] == 1u << 3, "the edited kick (%x)", en_grid[EN_ROW_KICK]);
+        en_song.part[0].kick[9] = EN_VEL_HIT;
+        en_rebuild();
+        run(0.01f);
+        CHECK(en_grid[EN_ROW_KICK] == (1u << 3 | 1u << 9), "an edit, at once (%x)", en_grid[EN_ROW_KICK]);
+        en_play(1);
+        for (k = 0; k < 400; k++) {
+            run(0.05f);
+            if (en_sect == S_VERSE) {
+                saw_v = 1;
+                wrong += en_active != (1u << LY_DRUMS | 1u << LY_BASS);
+            } else if (en_sect == S_CHORUS) {
+                saw_c = 1;
+                wrong += en_active != (1u << LY_DRUMS | 1u << LY_GUITAR | 1u << LY_NOISE);
+            } else {
+                wrong++;
+            }
+        }
+        CHECK(saw_v && saw_c && !wrong, "the two sections, each with its layers (verse %d chorus %d wrong %d)", saw_v, saw_c, wrong);
+        CHECK(en_song.locked, "still locked");
+    }
+
+    /* locked: OCT+ writes new lines for the part playing, Groove its drums; nothing else moves */
+    {
+        en_song_t a;
+        int k, same_drums = 1, other_same;
+        while (en_sect != S_VERSE)
+            run(0.02f);
+        memcpy(&a, &en_song, sizeof a);
+        for (k = 0; k < 6 && !memcmp(&a.part[0].bass, &en_song.part[0].bass, sizeof a.part[0].bass); k++) {
+            en_mutate();
+            run(0.01f);
+            RUN_UNTIL(!(en_pending & EN_PEND_MUTATE), 4.0f);
+            while (en_sect != S_VERSE)
+                run(0.02f);
+        }
+        CHECK(memcmp(&a.part[0].bass, &en_song.part[0].bass, sizeof a.part[0].bass) ||
+                  memcmp(&a.part[0].syn, &en_song.part[0].syn, sizeof a.part[0].syn), "mutate wrote the verse's lines");
+        other_same = !memcmp(&a.part[1], &en_song.part[1], sizeof a.part[1]) || !memcmp(&a.part[2], &en_song.part[2], sizeof a.part[2]);
+        same_drums = !memcmp(a.part[0].kick, en_song.part[0].kick, sizeof a.part[0].kick);
+        CHECK(other_same && same_drums, "and only those (other parts %d, drums %d)", other_same, same_drums);
+        CHECK(!memcmp(a.plan, en_song.plan, sizeof a.plan), "the plan stood");
+        memcpy(&a, &en_song, sizeof a);
+        en_set(P_GROOVE, G_THRASH);
+        en_turned(P_GROOVE);
+        run(2.5f);
+        CHECK(memcmp(a.part[0].kick, en_song.part[0].kick, sizeof a.part[0].kick), "Groove wrote the verse's drums");
+        CHECK(!memcmp(a.part[0].bass, en_song.part[0].bass, sizeof a.part[0].bass), "locked, Groove left the bass");
+        CHECK(!memcmp(a.part[2].tom, en_song.part[2].tom, sizeof a.part[2].tom), "and the breakdown's drums");
+    }
+
+    /* the editor's sounds, stopped */
+    {
+        int l;
+        en_play(0);
+        run(3.0f);
+        for (l = LY_DRUMS; l <= LY_METAL; l++) {
+            reset_meter();
+            en_audition(l, l == LY_DRUMS ? EN_HIT_SNARE : 2, l == LY_GUITAR ? EN_F_OPEN : 0);
+            run(0.4f);
+            CHECK(peak > 0.01f && !bad, "%s auditions (peak %f)", EN_LAYER_NAME[l], (double)peak);
+            run(1.5f);
+        }
+        en_regrow();
+        run(0.1f);
+        CHECK(!en_song.locked && en_song.plan_n > 4, "regrow: auto, the machine's song (%d sections)", en_song.plan_n);
     }
 
     /* stop: the tails die away */

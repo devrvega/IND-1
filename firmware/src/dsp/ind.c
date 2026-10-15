@@ -187,7 +187,8 @@ int en_sect_bars(int s, int a)
 }
 
 /* ------------------------------------------------------------ commands --- */
-enum { C_SET, C_PLAY, C_NEXT, C_BREAK, C_FILL, C_MUTATE, C_MUTE, C_SEED, C_PANIC, C_CLOCK, C_REGROW };
+enum { C_SET, C_PLAY, C_NEXT, C_BREAK, C_FILL, C_MUTATE, C_MUTE, C_SEED, C_PANIC, C_CLOCK, C_LOADED, C_REBUILD,
+       C_TURNED, C_AUDITION };
 #define QN 64u
 static uint32_t q[QN];
 static volatile uint32_t q_w, q_r;
@@ -210,12 +211,22 @@ void en_mute(int l, int on) { post(C_MUTE, l, on); }
 void en_seed(uint32_t s) { post(C_SEED, 0, (int)(s & 0xFFFFu)); }
 void en_panic(void) { post(C_PANIC, 0, 0); }
 void en_clock(int msg) { post(C_CLOCK, msg, 0); }
-void en_regrow(void) { post(C_REGROW, 0, 0); }
+void en_regrow(void)
+{
+    en_song.locked = 0;                          /* the render writes no more of it, and the UI no less */
+    post(C_LOADED, 0, 0);
+}
+void en_lock(int on) { en_song.locked = (uint8_t)(on != 0); }
+void en_song_loaded(void) { post(C_LOADED, 0, 0); }
+void en_rebuild(void) { post(C_REBUILD, 0, 0); }
+void en_turned(int p) { post(C_TURNED, p, 0); }
+void en_audition(int l, int what, int f) { post(C_AUDITION, l, (what & 0xFF) | (f & 0xFF) << 8); }
 
 /* -------------------------------------------------------------- state --- */
 volatile uint8_t en_playing, en_ext, en_sect, en_sect_bar, en_sect_len;
 volatile uint8_t en_plan[EN_PLAN_MAX], en_plan_len[EN_PLAN_MAX], en_plan_n, en_plan_pos, en_jumped, en_sect_next;
-volatile uint16_t en_song;
+volatile uint8_t en_part;
+volatile uint16_t en_songs;
 volatile uint8_t en_step, en_root_now, en_chord_root, en_active, en_muted, en_pending;
 volatile uint16_t en_grid[EN_NROW];
 volatile uint8_t en_grid_vel[EN_NROW][EN_NSTEP];
@@ -1060,12 +1071,13 @@ static void render_metal(uint32_t n)
 static struct {
     float ph[3], ds[2], dc[4], ss[2], sc[4], rs[2], rc[4], lvl, tgt, crack, rise, rise_t;
 } tex;
-static float tex_t;
+static float tex_t, tex_goal;                    /* the texture: 0 the drone .. 1 static; where it heads */
 
 static void render_noise(uint32_t n)
 {
     uint32_t j;
-    const float g = vol[LY_NOISE] * mg[LY_NOISE] * 0.5f, t = tex_t, wd = (1.0f - t) * 0.5f, wsn = t * 1.6f;
+    const float g = vol[LY_NOISE] * mg[LY_NOISE] * 0.5f, t = (tex_t += (tex_goal - tex_t) * fm_minf((float)n * (1.0f / (0.4f * EN_SR)), 1.0f));
+    const float wd = (1.0f - t) * 0.5f, wsn = t * 1.6f;
     const float f0 = mtof((float)(36 + root)) * (1.0f / EN_SR);
     const float inc[3] = {f0, f0 * 1.0035f, f0 * 1.41421f};
     float lvl = tex.lvl, rise = tex.rise, p0 = tex.ph[0], p1 = tex.ph[1], p2 = tex.ph[2], ck = tex.crack;
@@ -1127,18 +1139,16 @@ static void render_noise(uint32_t n)
 }
 
 /* ============================================================== material === */
-/* A song's material: the bass, the riff and the synth's part for the verse (0) and the chorus (1) (and
- * the synth's for the breakdown, 2), three progressions (scale degrees, a quarter of a section each),
- * and the metal's patterns. A step: n scale degrees above the bar's chord (REST: none) and flags. */
-#define REST (-128)
-enum { F_ACC = 1, F_SLIDE = 2, F_LONG = 4, F_OPEN = 8, F_OCT = 16, F_LEAD = 32 };
-typedef struct {
-    int8_t n;
-    uint8_t f;
-} nstep_t;
-static nstep_t m_bass[2][EN_NSTEP], m_gtr[2][EN_NSTEP], m_syn[3][EN_NSTEP];
-static int8_t m_prog[3][4];
-static uint8_t m_metal_n2, m_metal_rot[2];
+/* The song (ind.h, en_song): three parts, each a bar of every layer and four chords; the plan; the metal's
+ * two rings. On auto the generators below write it, and Evolve changes it a little as it plays; locked,
+ * only the player does. Inside this file a part's notes go by short names. */
+#define REST EN_REST
+enum { F_ACC = EN_F_ACC, F_SLIDE = EN_F_SLIDE, F_LONG = EN_F_LONG, F_OPEN = EN_F_OPEN, F_OCT = EN_F_OCT,
+       F_LEAD = EN_F_LEAD };
+typedef en_note_t nstep_t;
+en_song_t en_song;
+const char *const EN_PART_NAME[EN_NPARTS] = {"A", "B", "C"};
+int en_part_of(int s) { return s == S_CHORUS || s == S_DROP ? 1 : s == S_BREAK ? 2 : 0; }
 
 /* the moves away from the root: the b2 first (in Phrygian), the minor third, the fifth, the b6, the b7 */
 static const int8_t MOVES[8] = {1, 1, 2, 4, 5, -1, 3, 6};
@@ -1149,14 +1159,74 @@ static const uint8_t BASS_CELLS[EN_NGROOVE][4] = {
 /* the riff's chugs, from sparse to busy (Riff picks) */
 static const uint16_t CHUG[6] = {0x1111, 0x5555, 0x9249, 0xDDDD, 0xBBBB, 0xFFFF};
 
-static void gen_bass(nstep_t *p, int chorus)
+/* the drum grooves: kick, snare, hats, for the verse and the chorus. X accent, x hit, g ghost, o open */
+static const char *const GROOVE[EN_NGROOVE][2][3] = {
+    {{"X...X...X...X...", "....X.......X...", "..x...x...x...x."},      /* EBM: four on the floor */
+     {"X...X...X...X...", "....X.......X...", "x.o.x.o.x.o.x.o."}},
+    {{"X.....x...X.....", "....X.......X...", "x.x.x.x.x.x.x.x."},      /* rock */
+     {"X.....x.X.x.....", "....X.......X...", "o.x.o.x.o.x.o.x."}},
+    {{"X.........X..x..", "....X..g.g..X...", "xxxxxxxxxxxxxxxx"},      /* a sampled break */
+     {"X.x.......X..x..", "....X..g.g..X..g", "x.xxx.xxx.xxx.xo"}},
+    {{"X.........x.....", "........X.......", "x...x...x...x..."},      /* half time */
+     {"X.x.......X.x...", "........X.......", "x.x.x.x.x.x.x.x."}},
+    {{"X.x.X.x.X.x.X.x.", "....X.......X...", "x...x...x...x..."},      /* thrash */
+     {"XxxxXxxxXxxxXxxx", "....X.......X...", "o...o...o...o..."}},
+    {{"X...X...X...X...", "....X..g....X...", "x.x.x.x.x.x.x.x."},      /* a stomp */
+     {"X...X...X.x.X...", "....X.......X.xg", "x.xxx.xxx.xxx.xx"}},
+};
+static int vel_of(char c)
+{
+    return c == 'X' ? EN_VEL_ACC : c == 'x' || c == 'o' ? EN_VEL_HIT : c == 'g' ? EN_VEL_GHOST : 0;
+}
+
+static void gen_drums(en_part_t *pt, int part)
+{
+    int s;
+    for (s = 0; s < EN_NSTEP; s++) {
+        pt->tom[s] = 0;
+        pt->tom_kind[s] = EN_TOM_HIGH;
+        pt->hat_kind[s] = EN_HAT_CLOSED;
+    }
+    if (part == 2) {                             /* the breakdown: tribal toms over a lone kick */
+        static const char TRIBE[] = "X..x..X...x..x..";
+        for (s = 0; s < EN_NSTEP; s++) {
+            pt->kick[s] = s == 0 ? 110 : 0;
+            pt->snare[s] = pt->hat[s] = 0;
+            pt->tom[s] = (uint8_t)vel_of(TRIBE[s]);
+            pt->tom_kind[s] = (uint8_t)(s < 6 ? EN_TOM_LOW : s < 11 ? EN_TOM_MID : EN_TOM_LOW);
+        }
+        return;
+    }
+    {
+        const char *const *pat = GROOVE[par[P_GROOVE]][part];
+        for (s = 0; s < EN_NSTEP; s++) {
+            pt->kick[s] = (uint8_t)vel_of(pat[0][s]);
+            pt->snare[s] = (uint8_t)vel_of(pat[1][s]);
+            pt->hat[s] = (uint8_t)vel_of(pat[2][s]);
+            pt->hat_kind[s] = pat[2][s] == 'o' ? EN_HAT_OPEN : EN_HAT_CLOSED;
+        }
+    }
+}
+
+static void gen_bass(nstep_t *p, int part)
 {
     int s, c = BASS_CELLS[par[P_GROOVE]][irand(4)], last = 0;
     const uint16_t cell = CELL[c];
-    const float oct = (par[P_GROOVE] == G_EBM || par[P_GROOVE] == G_STOMP) ? 0.35f : 0.12f, move = chorus ? 0.3f : 0.18f;
+    const float oct = (par[P_GROOVE] == G_EBM || par[P_GROOVE] == G_STOMP) ? 0.35f : 0.12f, move = part ? 0.3f : 0.18f;
     for (s = 0; s < EN_NSTEP; s++) {
         p[s].n = REST;
         p[s].f = 0;
+    }
+    if (part == 2) {                             /* the breakdown: a long note, perhaps another halfway */
+        p[0].n = 0;
+        p[0].f = F_LONG;
+        if (frand() < 0.5f) {
+            p[8].n = en_song.part[0].bass[8].n == REST ? 0 : en_song.part[0].bass[8].n;
+            p[8].f = F_LONG;
+        }
+        return;
+    }
+    for (s = 0; s < EN_NSTEP; s++) {
         if (!(cell >> s & 1u))
             continue;
         p[s].n = 0;
@@ -1174,7 +1244,7 @@ static void gen_bass(nstep_t *p, int chorus)
     }
 }
 
-static void gen_riff(nstep_t *p, int chorus)
+static void gen_riff(nstep_t *p, int part)
 {
     int s, k = (int)((float)par[P_RIFF] * 0.0599f);    /* 0..5 */
     uint16_t cell;
@@ -1185,7 +1255,9 @@ static void gen_riff(nstep_t *p, int chorus)
         p[s].n = REST;
         p[s].f = 0;
     }
-    if (chorus) {                                /* open chords on the strong beats, chugs between */
+    if (part == 2)                               /* the breakdown: the guitars wait */
+        return;
+    if (part == 1) {                             /* open chords on the strong beats, chugs between */
         int every = par[P_GROOVE] == G_HALF || frand() < 0.5f ? 8 : 4;
         for (s = 0; s < EN_NSTEP; s++) {
             if (s % every == 0) {
@@ -1244,15 +1316,43 @@ static void gen_synth(nstep_t *p, int part)
         }
 }
 
-static void gen_metal(void)
+/* the clangs' three pitches, from the song's metal tone */
+static void metal_tune(void)
+{
+    uint32_t h = (uint32_t)en_song.metal_tone * 2654435761u + 12345u;
+    int i;
+    for (i = 0; i < 3; i++) {
+        h ^= h >> 15;
+        h *= 0x2C1B3C6Du;
+        h ^= h >> 12;
+        metal_f[i] = 420.0f * fm_exp2f((float)(h >> 24) * (1.7f / 256.0f));
+    }
+}
+
+static int ring_len(int r)
+{
+    int n = en_song.ring_len[r & 1];
+    return n < 1 ? 1 : n > EN_NSTEP ? EN_NSTEP : n;
+}
+
+/* Hits: up to six anvils in sixteen, the scrap up to half its ring */
+static void rings_hits(void)
+{
+    const int h = par[P_HITS], n0 = ring_len(0), n1 = ring_len(1);
+    en_song.ring_hits[0] = (uint8_t)((h * n0 * 3 / 8 + 50) / 100);
+    en_song.ring_hits[1] = (uint8_t)((h * (n1 / 2) + 50) / 100);
+}
+
+static void gen_rings(void)                     /* the anvil on sixteen steps, the scrap on 12, 9, 7 or 5 */
 {
     static const uint8_t N2[4] = {12, 7, 5, 9};
-    int i;
-    m_metal_n2 = N2[irand(4)];
-    m_metal_rot[0] = (uint8_t)irand(16);
-    m_metal_rot[1] = (uint8_t)irand(m_metal_n2);
-    for (i = 0; i < 3; i++)
-        metal_f[i] = 420.0f * fm_exp2f(frand() * 1.7f);
+    en_song.ring_len[0] = EN_NSTEP;
+    en_song.ring_len[1] = N2[irand(4)];
+    en_song.ring_turn[0] = (uint8_t)irand(EN_NSTEP);
+    en_song.ring_turn[1] = (uint8_t)irand(en_song.ring_len[1]);
+    en_song.metal_tone = (uint8_t)irand(256);
+    rings_hits();
+    metal_tune();
 }
 
 /* the progressions: the first five stay home (verses), the rest move (choruses) */
@@ -1262,116 +1362,182 @@ static void gen_progs(void)
 {
     int i, a = irand(5), b = frand() < 0.8f ? 5 + irand(5) : irand(5);
     for (i = 0; i < 4; i++) {
-        m_prog[0][i] = PROG[a][i];
-        m_prog[1][i] = PROG[b][i];
-        m_prog[2][i] = (int8_t)(i >= 2 && frand() < 0.4f ? 5 : 0);
+        en_song.part[0].prog[i] = PROG[a][i];
+        en_song.part[1].prog[i] = PROG[b][i];
+        en_song.part[2].prog[i] = (int8_t)(i >= 2 && frand() < 0.4f ? 5 : 0);
     }
 }
 
-enum { R_BASS = 1, R_GTR = 2, R_SYN = 4, R_ALL = 7 };
-static void gen(int what)
+/* what to write: a layer's bit for its lines (the metal's: the rings' hits), and these */
+enum { W_DRUMS = 1 << LY_DRUMS, W_BASS = 1 << LY_BASS, W_GTR = 1 << LY_GUITAR, W_SYN = 1 << LY_SYNTH,
+       W_HITS = 1 << LY_METAL, W_LINES = W_BASS | W_GTR | W_SYN, W_PROG = 64, W_RINGS = 128, W_ALL = 255 };
+static void gen(int what, int parts)            /* parts: bit p, part p */
 {
-    if (what & R_BASS) {
-        gen_bass(m_bass[0], 0);
-        gen_bass(m_bass[1], 1);
+    int p;
+    for (p = 0; p < EN_NPARTS; p++) {
+        en_part_t *pt = &en_song.part[p];
+        if (!(parts >> p & 1))
+            continue;
+        if (what & W_DRUMS)
+            gen_drums(pt, p);
+        if (what & W_BASS)
+            gen_bass(pt->bass, p);
+        if (what & W_GTR)
+            gen_riff(pt->gtr, p);
+        if (what & W_SYN)
+            gen_synth(pt->syn, p);
     }
-    if (what & R_GTR) {
-        gen_riff(m_gtr[0], 0);
-        gen_riff(m_gtr[1], 1);
-    }
-    if (what & R_SYN) {
-        gen_synth(m_syn[0], 0);
-        gen_synth(m_syn[1], 1);
-        gen_synth(m_syn[2], 2);
-    }
-    if (what == R_ALL) {
+    if (what & W_PROG)
         gen_progs();
-        gen_metal();
-    }
+    if (what & W_RINGS)
+        gen_rings();
+    else if (what & W_HITS)
+        rings_hits();
 }
 
-/* Evolve, every four bars: one small change somewhere */
+/* Evolve, every four bars on auto: one small change somewhere */
 static void evolve_step(void)
 {
-    int m = irand(2), s = irand(EN_NSTEP);
+    en_part_t *pt = &en_song.part[irand(2)];
+    int s = irand(EN_NSTEP);
     if (frand() >= evolve * 0.6f)
         return;
     switch (irand(4)) {
     case 0:                                      /* a bass note moves, or comes or goes */
-        if (m_bass[m][s].n == REST)
-            m_bass[m][s].n = 0;
+        if (pt->bass[s].n == REST)
+            pt->bass[s].n = 0;
         else if (s && frand() < 0.5f)
-            m_bass[m][s].n = REST;
+            pt->bass[s].n = REST;
         else
-            m_bass[m][s].n = MOVES[irand(8)];
+            pt->bass[s].n = MOVES[irand(8)];
         break;
     case 1:                                      /* a chug becomes an accent, or an accent a chug */
-        if (m_gtr[m][s].n != REST && !(m_gtr[m][s].f & F_OPEN)) {
-            m_gtr[m][s].n = MOVES[irand(8)];
-            m_gtr[m][s].f = F_ACC | F_OPEN;
-        } else if (m_gtr[m][s].f & F_OPEN && s % 4) {
-            m_gtr[m][s].n = 0;
-            m_gtr[m][s].f = 0;
+        if (pt->gtr[s].n != REST && !(pt->gtr[s].f & F_OPEN)) {
+            pt->gtr[s].n = MOVES[irand(8)];
+            pt->gtr[s].f = F_ACC | F_OPEN;
+        } else if (pt->gtr[s].f & F_OPEN && s % 4) {
+            pt->gtr[s].n = 0;
+            pt->gtr[s].f = 0;
         }
         break;
     case 2: {                                    /* the stabs turn a sixteenth */
-        nstep_t t = m_syn[m][EN_NSTEP - 1];
+        nstep_t t = pt->syn[EN_NSTEP - 1];
         int k;
-        if (m_syn[m][0].f & F_LEAD)
+        if (pt->syn[0].f & F_LEAD)
             break;
         for (k = EN_NSTEP - 1; k > 0; k--)
-            m_syn[m][k] = m_syn[m][k - 1];
-        m_syn[m][0] = t;
+            pt->syn[k] = pt->syn[k - 1];
+        pt->syn[0] = t;
         break;
     }
-    default:                                     /* the metal turns */
-        m_metal_rot[irand(2)]++;
+    default: {                                   /* the metal turns */
+        int r = irand(2);
+        en_song.ring_turn[r] = (uint8_t)((en_song.ring_turn[r] + 1) % ring_len(r));
         break;
+    }
     }
 }
 
-/* ============================================================== the song === */
-/* the drum grooves: kick, snare, hats, for the verse and the chorus. X accent, x hit, g ghost, o open */
-static const char *const GROOVE[EN_NGROOVE][2][3] = {
-    {{"X...X...X...X...", "....X.......X...", "..x...x...x...x."},      /* EBM: four on the floor */
-     {"X...X...X...X...", "....X.......X...", "x.o.x.o.x.o.x.o."}},
-    {{"X.....x...X.....", "....X.......X...", "x.x.x.x.x.x.x.x."},      /* rock */
-     {"X.....x.X.x.....", "....X.......X...", "o.x.o.x.o.x.o.x."}},
-    {{"X.........X..x..", "....X..g.g..X...", "xxxxxxxxxxxxxxxx"},      /* a sampled break */
-     {"X.x.......X..x..", "....X..g.g..X..g", "x.xxx.xxx.xxx.xo"}},
-    {{"X.........x.....", "........X.......", "x...x...x...x..."},      /* half time */
-     {"X.x.......X.x...", "........X.......", "x.x.x.x.x.x.x.x."}},
-    {{"X.x.X.x.X.x.X.x.", "....X.......X...", "x...x...x...x..."},      /* thrash */
-     {"XxxxXxxxXxxxXxxx", "....X.......X...", "o...o...o...o..."}},
-    {{"X...X...X...X...", "....X..g....X...", "x.x.x.x.x.x.x.x."},      /* a stomp */
-     {"X...X...X.x.X...", "....X.......X.xg", "x.xxx.xxx.xxx.xx"}},
-};
+void en_song_defaults(en_song_t *sg)
+{
+    uint8_t *b = (uint8_t *)sg;
+    uint32_t i;
+    int p, s;
+    for (i = 0; i < sizeof *sg; i++)
+        b[i] = 0;
+    for (p = 0; p < EN_NPARTS; p++)
+        for (s = 0; s < EN_NSTEP; s++)
+            sg->part[p].bass[s].n = sg->part[p].gtr[s].n = sg->part[p].syn[s].n = REST;
+    sg->plan_n = 1;
+    sg->plan[0].type = S_VERSE;
+    sg->plan[0].layers = 1u << LY_DRUMS | 1u << LY_BASS;
+    sg->ring_len[0] = EN_NSTEP;
+    sg->ring_len[1] = 12;
+    sg->ring_hits[0] = sg->ring_hits[1] = 2;
+}
 
+static int note_ok(const en_note_t *n) { return (n->n == REST || (n->n >= -7 && n->n <= 14)) && n->f < 64u; }
+int en_song_valid(const en_song_t *sg)
+{
+    int p, s, r;
+    if (sg->plan_n < 1 || sg->plan_n > EN_PLAN_MAX || sg->locked > 1u)
+        return 0;
+    for (s = 0; s < sg->plan_n; s++) {
+        const en_entry_t *e = &sg->plan[s];
+        if (e->type >= EN_NSECT || e->bars > EN_MAX_BARS || e->layers >= 1u << EN_NLAYER || e->tex >= EN_NTEX)
+            return 0;
+    }
+    for (r = 0; r < 2; r++)
+        if (sg->ring_len[r] < 1 || sg->ring_len[r] > EN_NSTEP || sg->ring_hits[r] > sg->ring_len[r] ||
+            sg->ring_turn[r] >= sg->ring_len[r])
+            return 0;
+    for (p = 0; p < EN_NPARTS; p++) {
+        const en_part_t *pt = &sg->part[p];
+        for (s = 0; s < 4; s++)
+            if (pt->prog[s] < -7 || pt->prog[s] > 14)
+                return 0;
+        for (s = 0; s < EN_NSTEP; s++)
+            if (pt->kick[s] > 127 || pt->snare[s] > 127 || pt->hat[s] > 127 || pt->tom[s] > 127 ||
+                pt->hat_kind[s] > EN_HAT_CRASH || pt->tom_kind[s] > EN_TOM_LOW || !note_ok(&pt->bass[s]) ||
+                !note_ok(&pt->gtr[s]) || !note_ok(&pt->syn[s]))
+                return 0;
+    }
+    return 1;
+}
+
+/* ============================================================== the song === */
 typedef struct {
     uint8_t kick, snare, hat, tom;              /* velocities, 0 none */
-    uint8_t hat_kind, tom_kind, roll, boom;     /* hat 0 closed 1 open 2 crash; tom 0 high .. 2 low; roll: a 32nd after */
+    uint8_t hat_kind, tom_kind, roll, boom;     /* EN_HAT_*, EN_TOM_*; roll: a 32nd after; boom: an impact */
     uint8_t metal;                              /* bit 0 an anvil, bit 1 scrap */
     nstep_t bass, gtr, syn;
 } step_t;
-static step_t bar[EN_NSTEP];
+static step_t bar[EN_NSTEP];                    /* the bar playing: its part, as its section treats it */
 
-static int sect = S_INTRO, prev_sect = S_INTRO, sect_bar, sect_len = 8, plan_pos, plan_n, jumped;
-static uint8_t plan[EN_PLAN_MAX];
+static int sect = S_INTRO, prev_sect = S_INTRO, sect_bar, sect_len = 8, plan_pos, jumped, part;
 static int8_t jq[3];
 static int jq_n;
 static int pend_kind;                           /* at the bar: 1 the next section, 2 a breakdown (or on from it) */
-static uint8_t pend_fill, pend_mutate, pend_regen, pend_act, pend_regrow, pend_rebuild, bar_fresh, fill_on;
+static uint8_t pend_fill, pend_mutate, pend_write, pend_act, pend_top, pend_rebuild, bar_fresh, fill_on;
 static uint32_t sixteenth;
 static int chord_deg;
-static uint32_t metal_g1, metal_g2;
 static int stop_at = EN_NSTEP;                  /* a stop's silence from this step (EN_NSTEP: none) */
+static uint8_t tex_knob = 1;                    /* the section's bed follows Texture */
 
-static int vel_of(char c) { return c == 'X' ? 120 : c == 'x' || c == 'o' ? 92 : c == 'g' ? 40 : 0; }
+/* which layers play a section, in percent (Intensity leans every one up or down) */
+static const uint8_t PACT[EN_NSECT][EN_NLAYER] = {
+    {45, 50, 0, 50, 80, 100},       /* intro */
+    {100, 100, 35, 60, 70, 60},     /* verse: the guitars mostly wait for the chorus */
+    {100, 100, 30, 70, 50, 100},    /* build */
+    {100, 100, 100, 85, 60, 50},    /* chorus */
+    {35, 45, 0, 85, 85, 100},       /* breakdown */
+    {100, 100, 100, 100, 80, 50},   /* drop */
+    {60, 50, 30, 50, 60, 100}};     /* outro */
+static const float SECT_NOISE[EN_NSECT] = {1.0f, 0.45f, 0.6f, 0.35f, 1.0f, 0.35f, 0.9f};
+
+/* a section's layers: by chance (dice), or as they mostly fall */
+static uint8_t pick_layers(int s, int dice)
+{
+    int l;
+    float bias = (intensity - 0.5f) * 100.0f;
+    uint8_t a = 0;
+    for (l = 0; l < EN_NLAYER; l++)
+        if ((dice ? frand() * 100.0f : 50.0f) < (float)PACT[s][l] + bias)
+            a |= (uint8_t)(1u << l);
+    if (s == S_VERSE || s == S_CHORUS || s == S_DROP || s == S_BUILD)
+        a |= 1u << LY_DRUMS | 1u << LY_BASS;     /* these always drive */
+    if (s == S_CHORUS || s == S_DROP)
+        a |= (uint8_t)(intensity > 0.2f ? 1u << LY_GUITAR : 0u);
+    if (!(a & (1u << LY_NOISE | 1u << LY_METAL | 1u << LY_SYNTH)) && (s == S_INTRO || s == S_BREAK))
+        a |= 1u << LY_NOISE;
+    return a;
+}
 
 static void plan_song(void)
 {
+    uint8_t t[EN_PLAN_MAX];
     int n = 0, i;
-#define P(s) (plan[n++] = (uint8_t)(s))
+#define P(s) (t[n++] = (uint8_t)(s))
     P(S_INTRO);
     P(S_VERSE);
     if (frand() < 0.7f)
@@ -1388,49 +1554,72 @@ static void plan_song(void)
         P(S_CHORUS);
     P(S_OUTRO);
 #undef P
-    plan_n = n;
-    en_plan_n = (uint8_t)n;
-    for (i = 0; i < n; i++)
-        en_plan[i] = plan[i];
+    for (i = 0; i < n; i++) {
+        en_entry_t *e = &en_song.plan[i];
+        e->type = t[i];
+        e->bars = 0;
+        e->layers = pick_layers(t[i], 1);
+        e->tex = EN_TEX_KNOB;
+    }
+    en_song.plan_n = (uint8_t)n;
+}
+
+static int plan_count(void)
+{
+    int n = en_song.plan_n;
+    return n < 1 ? 1 : n > EN_PLAN_MAX ? EN_PLAN_MAX : n;
+}
+static int plan_type(int i)
+{
+    int t = en_song.plan[(unsigned)i < (unsigned)plan_count() ? i : 0].type;
+    return t < EN_NSECT ? t : S_VERSE;
+}
+static int entry_len(const en_entry_t *e)
+{
+    if (e->bars)
+        return e->bars < EN_MAX_BARS ? e->bars : EN_MAX_BARS;
+    return en_sect_bars(e->type < EN_NSECT ? e->type : S_VERSE, par[P_ARRANGE]);
+}
+/* the plan's entry the section playing follows: its own, or (a jump) the plan's next of its kind */
+static const en_entry_t *sect_entry(void)
+{
+    int i, n = plan_count();
+    for (i = 0; i < n; i++) {
+        int k = (plan_pos + i) % n;
+        if (plan_type(k) == sect && (jumped || !i))
+            return &en_song.plan[k];
+        if (!jumped)
+            break;
+    }
+    return 0;
 }
 
 static int peek_next(void);
 static void plan_publish(void)
 {
-    int i;
-    for (i = 0; i < plan_n; i++)
-        en_plan_len[i] = (uint8_t)en_sect_bars(plan[i], par[P_ARRANGE]);
+    int i, n = plan_count();
+    for (i = 0; i < n; i++) {
+        en_plan[i] = (uint8_t)plan_type(i);
+        en_plan_len[i] = (uint8_t)entry_len(&en_song.plan[i]);
+    }
+    en_plan_n = (uint8_t)n;
     en_plan_pos = (uint8_t)plan_pos;
     en_jumped = (uint8_t)jumped;
     en_sect_next = (uint8_t)peek_next();
 }
 
-/* which layers play a section, in percent (Intensity leans every one up or down) */
-static const uint8_t PACT[EN_NSECT][EN_NLAYER] = {
-    {45, 50, 0, 50, 80, 100},       /* intro */
-    {100, 100, 35, 60, 70, 60},     /* verse: the guitars mostly wait for the chorus */
-    {100, 100, 30, 70, 50, 100},    /* build */
-    {100, 100, 100, 85, 60, 50},    /* chorus */
-    {35, 45, 0, 85, 85, 100},       /* breakdown */
-    {100, 100, 100, 100, 80, 50},   /* drop */
-    {60, 50, 30, 50, 60, 100}};     /* outro */
-static const float SECT_NOISE[EN_NSECT] = {1.0f, 0.45f, 0.6f, 0.35f, 1.0f, 0.35f, 0.9f};
-
-static void pick_act(void)
+/* the section's length (len_too), its layers and its bed, from its entry */
+static void sect_resolve(int len_too)
 {
-    int l;
-    float bias = (intensity - 0.5f) * 100.0f;
-    act = 0;
-    for (l = 0; l < EN_NLAYER; l++)
-        if (frand() * 100.0f < (float)PACT[sect][l] + bias)
-            act |= (uint8_t)(1u << l);
-    if (sect == S_VERSE || sect == S_CHORUS || sect == S_DROP || sect == S_BUILD)
-        act |= 1u << LY_DRUMS | 1u << LY_BASS;   /* these always drive */
-    if (sect == S_CHORUS || sect == S_DROP)
-        act |= (uint8_t)(intensity > 0.2f ? 1u << LY_GUITAR : 0u);
-    if (!(act & (1u << LY_NOISE | 1u << LY_METAL | 1u << LY_SYNTH)) && (sect == S_INTRO || sect == S_BREAK))
-        act |= 1u << LY_NOISE;
+    const en_entry_t *e = sect_entry();
+    if (len_too)
+        sect_len = e ? entry_len(e) : en_sect_bars(sect, par[P_ARRANGE]);
+    act = e ? (uint8_t)(e->layers & ((1u << EN_NLAYER) - 1u)) : pick_layers(sect, 0);
+    tex_knob = !e || e->tex == EN_TEX_KNOB || e->tex >= EN_NTEX;
+    tex_goal = tex_knob ? (float)par[P_TEXTURE] * 0.01f : e->tex == EN_TEX_DRONE ? 0.0f : e->tex == EN_TEX_STATIC ? 1.0f : 0.5f;
+    tex.tgt = en_playing && (act >> LY_NOISE & 1u) ? SECT_NOISE[sect] : 0.0f;
     en_active = act;
+    en_sect_len = (uint8_t)sect_len;
 }
 
 static void sect_begin(int s)
@@ -1438,24 +1627,31 @@ static void sect_begin(int s)
     prev_sect = sect;
     sect = s;
     sect_bar = 0;
-    sect_len = en_sect_bars(s, par[P_ARRANGE]);
-    pick_act();
-    tex.tgt = en_playing && (act >> LY_NOISE & 1u) ? SECT_NOISE[s] : 0.0f;
+    part = en_part_of(s);
+    sect_resolve(1);
     en_sect = (uint8_t)s;
-    en_sect_len = (uint8_t)sect_len;
+    en_part = (uint8_t)part;
     en_sect_bar = 0;
     plan_publish();
 }
 
-static void new_song(void)
+static void song_top(void)                      /* the plan from its first section */
 {
-    if (evolve > 0.0f) {
-        gen(R_ALL);
+    plan_pos = 0;
+    jumped = 0;
+    jq_n = 0;
+    sect_begin(plan_type(0));
+}
+
+static void new_song(void)                      /* the plan played through: on auto a new song, else again */
+{
+    if (!en_song.locked && evolve > 0.0f) {
+        gen(W_ALL, 7);
         plan_song();
     }
     plan_pos = 0;
     jumped = 0;
-    en_song++;
+    en_songs++;
 }
 
 static void sect_next(void)                     /* the next section: a jump's, or the plan's */
@@ -1469,9 +1665,9 @@ static void sect_next(void)                     /* the next section: a jump's, o
         jumped = 1;
     } else {
         jumped = 0;
-        if (++plan_pos >= plan_n)
+        if (++plan_pos >= plan_count())
             new_song();
-        s = plan[plan_pos];
+        s = plan_type(plan_pos);
     }
     sect_begin(s);
 }
@@ -1498,7 +1694,9 @@ static int peek_next(void)                      /* the section after this one */
 {
     if (jq_n)
         return jq[0];
-    return plan_pos + 1 < plan_n ? plan[plan_pos + 1] : S_INTRO;
+    if (plan_pos + 1 < plan_count())
+        return plan_type(plan_pos + 1);
+    return en_song.locked || evolve <= 0.0f ? plan_type(0) : S_INTRO;
 }
 
 /* a fill from step st to the bar's end; kind 0 the snare, 1 the toms, 2 kick and snare together, 3 a stop */
@@ -1546,7 +1744,7 @@ static void fill_from(int st, int kind)
         bar[st].kick = 127;
         bar[st].snare = 120;
         bar[st].hat = 110;
-        bar[st].hat_kind = 2;
+        bar[st].hat_kind = EN_HAT_CRASH;
         break;
     }
     fill_on = 1;
@@ -1576,13 +1774,19 @@ static void grid_publish(void)
         en_grid[r] = g[r];
 }
 
-/* the bar ahead, every layer, at its downbeat */
+/* the bar ahead, every layer, at its downbeat: the section's part, as the section treats it. On auto
+ * the fills and the ghosts fall as they may; locked, each bar of the song falls the same way every time */
 static void bar_build(void)
 {
-    const int chorus = sect == S_CHORUS || sect == S_DROP, m = chorus ? 1 : 0, g = par[P_GROOVE];
+    const en_part_t *pt = &en_song.part[part];
     const int len = sect_len ? sect_len : 4, last = sect_len && sect_bar == sect_len - 1;
-    const char *const *pat = GROOVE[g][chorus];
+    const uint32_t dice = rng, base = sixteenth & ~15u;
     int s, next = last ? peek_next() : sect;
+    if (en_song.locked) {                        /* the bar's own dice */
+        rng = ((uint32_t)(plan_pos * 64 + sect_bar) * 2654435761u) ^ ((uint32_t)(sect * 2 + jumped) * 40503u) ^ 0x5EED5u;
+        rnd();
+        rnd();
+    }
     for (s = 0; s < EN_NSTEP; s++) {
         bar[s].kick = bar[s].snare = bar[s].hat = bar[s].tom = 0;
         bar[s].hat_kind = bar[s].tom_kind = bar[s].roll = bar[s].boom = bar[s].metal = 0;
@@ -1592,22 +1796,24 @@ static void bar_build(void)
     fill_on = 0;
     stop_at = EN_NSTEP;
     {   /* the progression: a quarter of the section a chord (four bars a chord while looping) */
-        int slot = sect_len >= 4 ? sect_len / 4 : sect_len ? 1 : 4, pi = sect == S_BREAK || sect == S_INTRO ? 2 : m;
-        chord_deg = sect == S_BUILD ? 0 : m_prog[pi][(sect_bar / slot) & 3];
-        en_chord_root = (uint8_t)((root + en_degree(pool, chord_deg) + 12) % 12);
+        int slot = sect_len >= 4 ? sect_len / 4 : sect_len ? 1 : 4;
+        chord_deg = sect == S_BUILD ? 0 : pt->prog[(sect_bar / slot) & 3];
+        en_chord_root = (uint8_t)((root + en_degree(pool, chord_deg) + 12 * 3) % 12);
     }
     if (act >> LY_DRUMS & 1u) {
         int k;
         for (s = 0; s < EN_NSTEP; s++) {
-            bar[s].kick = (uint8_t)vel_of(pat[0][s]);
-            bar[s].snare = (uint8_t)vel_of(pat[1][s]);
-            bar[s].hat = (uint8_t)vel_of(pat[2][s]);
-            bar[s].hat_kind = pat[2][s] == 'o';
+            bar[s].kick = pt->kick[s];
+            bar[s].snare = pt->snare[s];
+            bar[s].hat = pt->hat[s];
+            bar[s].hat_kind = pt->hat_kind[s];
+            bar[s].tom = pt->tom[s];
+            bar[s].tom_kind = pt->tom_kind[s];
         }
         switch (sect) {
         case S_INTRO:                            /* hats, then the kick joins halfway */
             for (s = 0; s < EN_NSTEP; s++) {
-                bar[s].snare = 0;
+                bar[s].snare = bar[s].tom = 0;
                 if (sect_bar < len / 2)
                     bar[s].kick = 0;
                 else
@@ -1618,30 +1824,21 @@ static void bar_build(void)
             int qq = sect_bar * 4 / len, every = qq == 0 ? 4 : qq == 1 ? 2 : 1;
             for (s = 0; s < EN_NSTEP; s++) {
                 bar[s].kick = s % 4 ? (last && !(s & 1) ? 100 : 0) : 115;
-                bar[s].hat = 0;
+                bar[s].hat = bar[s].tom = 0;
                 bar[s].snare = s % every ? 0 : (uint8_t)(45 + 75 * (sect_bar * 16 + s) / (len * 16));
                 bar[s].roll = last && s >= 8;
             }
             break;
         }
-        case S_BREAK:                            /* tribal toms over a lone kick */
-            for (s = 0; s < EN_NSTEP; s++) {
-                static const char TRIBE[] = "X..x..X...x..x..";
-                bar[s].kick = s == 0 ? 110 : 0;
-                bar[s].snare = bar[s].hat = 0;
-                bar[s].tom = (uint8_t)vel_of(TRIBE[s]);
-                bar[s].tom_kind = (uint8_t)(s < 6 ? 2 : s < 11 ? 1 : 2);
-            }
-            break;
         case S_OUTRO:                            /* thinning out */
             if (sect_bar >= len / 2)
                 for (s = 0; s < EN_NSTEP; s++)
-                    bar[s].snare = bar[s].hat = 0;
+                    bar[s].snare = bar[s].hat = bar[s].tom = 0;
             break;
         default:
             break;
         }
-        if (sect != S_BUILD && sect != S_BREAK) {   /* Evolve: a ghost here and there, an open hat */
+        if (!en_song.locked && sect != S_BUILD && sect != S_BREAK) {   /* Evolve: a ghost, an open hat */
             if (frand() < evolve * 0.35f) {
                 static const uint8_t AT[5] = {7, 10, 11, 14, 15};
                 k = AT[irand(5)];
@@ -1651,11 +1848,11 @@ static void bar_build(void)
             if (frand() < evolve * 0.3f && !bar[k = 3 + 4 * irand(4)].snare)
                 bar[k].snare = 35;
             if (frand() < evolve * 0.25f && bar[14].hat)
-                bar[14].hat_kind = 1;
+                bar[14].hat_kind = EN_HAT_OPEN;
         }
         if (sect_bar == 0 && (sect == S_DROP || sect == S_CHORUS)) {
             bar[0].hat = 120;                    /* the downbeat: a crash; into a drop, an impact */
-            bar[0].hat_kind = 2;
+            bar[0].hat_kind = EN_HAT_CRASH;
             bar[0].boom = sect == S_DROP || prev_sect == S_BUILD;
         }
         if (last && next != sect && sect != S_BUILD) {   /* the section's last bar fills */
@@ -1673,10 +1870,14 @@ static void bar_build(void)
             pend_fill = 0;
         }
     }
-    {   /* the metal: two Euclidean rings, 16 steps and 12, 9, 7 or 5 across the bars */
-        int k1 = (par[P_HITS] * 6 + 50) / 100, k2 = (par[P_HITS] * (m_metal_n2 / 2) + 50) / 100;
-        metal_g1 = en_euclid(k1, 16, m_metal_rot[0]);
-        metal_g2 = en_euclid(k2, m_metal_n2, m_metal_rot[1] % m_metal_n2);
+    {   /* the metal: two Euclidean rings, each turning on its own length across the bars */
+        const int n0 = ring_len(0), n1 = ring_len(1);
+        const uint32_t g0 = en_euclid(en_song.ring_hits[0], n0, en_song.ring_turn[0] % n0);
+        const uint32_t g1 = en_euclid(en_song.ring_hits[1], n1, en_song.ring_turn[1] % n1);
+        for (s = 0; s < EN_NSTEP; s++)
+            if (act >> LY_METAL & 1u)
+                bar[s].metal = (uint8_t)((g0 >> ((base + (uint32_t)s) % (uint32_t)n0) & 1u) |
+                                         (g1 >> ((base + (uint32_t)s) % (uint32_t)n1) & 1u) << 1);
     }
     for (s = 0; s < EN_NSTEP; s++) {
         step_t *e = &bar[s];
@@ -1686,13 +1887,13 @@ static void bar_build(void)
                     e->bass.n = 0;
                     e->bass.f = (s & 3) ? 0 : F_ACC;
                 }
-            } else if (sect == S_BREAK || sect == S_INTRO) {
-                if (s == 0 || (s == 8 && frand() < 0.5f)) {
-                    e->bass.n = m_bass[0][s].n == REST ? 0 : m_bass[0][s].n;
+            } else if (sect == S_INTRO) {        /* long notes: the downbeat's, and halfway's */
+                if (s == 0 || (s == 8 && pt->bass[8].n != REST)) {
+                    e->bass.n = pt->bass[s].n == REST ? 0 : pt->bass[s].n;
                     e->bass.f = F_LONG;
                 }
             } else {
-                e->bass = m_bass[m][s];
+                e->bass = pt->bass[s];
             }
         }
         if (act >> LY_GUITAR & 1u) {
@@ -1701,21 +1902,25 @@ static void bar_build(void)
                     e->gtr.n = 0;
                     e->gtr.f = 0;
                 }
-            } else if (sect != S_INTRO && sect != S_BREAK) {
-                e->gtr = m_gtr[m][s];
+            } else if (sect != S_INTRO) {
+                e->gtr = pt->gtr[s];
             }
         }
-        if (act >> LY_SYNTH & 1u)
-            e->syn = m_syn[(sect == S_BREAK || sect == S_INTRO) ? 2 : m][s];
-        if (act >> LY_METAL & 1u) {
-            uint32_t pos = (sixteenth + (uint32_t)s) % m_metal_n2;
-            e->metal = (uint8_t)((metal_g1 >> s & 1u) | (metal_g2 >> pos & 1u) << 1);
+        if (act >> LY_SYNTH & 1u) {
+            if (sect != S_INTRO) {
+                e->syn = pt->syn[s];
+            } else if ((s == 0 || s == 8) && pt->syn[s].n != REST) {   /* the intro: the half bars, held */
+                e->syn = pt->syn[s];
+                e->syn.f |= F_LONG;
+            }
         }
     }
     for (s = stop_at; s < EN_NSTEP; s++) {       /* a stop takes the others with it */
         bar[s].bass.n = bar[s].gtr.n = bar[s].syn.n = REST;
         bar[s].metal = 0;
     }
+    if (en_song.locked)
+        rng = dice;
     grid_publish();
 }
 
@@ -1900,6 +2105,50 @@ static inline void delays(float in, float *ol, float *or_)
 }
 
 /* ============================================================ the grid === */
+/* a part's notes: scale degree deg above the bar's chord, flags F_* */
+static void bass_note(int deg, uint8_t f, int slide_next)
+{
+    int n = 36 + root + en_degree(pool, chord_deg + deg);
+    int32_t len = (int32_t)(step_len * ((f & F_LONG) ? 7.0f : slide_next ? 1.15f : 0.7f));
+    while (n > 50)
+        n -= 12;
+    while (n < 31)
+        n += 12;
+    if (f & F_OCT)
+        n += 12;
+    bass_play(n, f, len);
+}
+
+static void gtr_note(int deg, uint8_t f)
+{
+    int n = 36 + root + en_degree(pool, chord_deg + deg);
+    while (n >= 48)
+        n -= 12;
+    while (n < 28)
+        n += 12;
+    gtr_play(n, f, (f & F_ACC) ? 1.0f : 0.8f);
+}
+
+static void syn_note(int deg, uint8_t f, int s)
+{
+    const int d = chord_deg + deg, base = 48 + root;
+    const float vel = (f & F_ACC) ? 0.95f : 0.7f;
+    if (f & F_LEAD) {                            /* a line: one voice, an octave up */
+        int n = base + 12 + en_degree(pool, d);
+        while (n > 79)
+            n -= 12;
+        syn_voice(n, vel, 0.25f * (float)(s & 2) - 0.25f, 0, 0);
+    } else {                                     /* a stab: the chord on the degree (stacked thirds) */
+        int n0 = base + en_degree(pool, d), k;
+        while (n0 >= 60 + root % 12 && n0 > 57)
+            n0 -= 12;
+        for (k = 0; k < 3; k++)
+            syn_voice(n0 + en_degree(pool, d + 2 * k) - en_degree(pool, d), vel, (float)(k - 1) * 0.55f, k * 40,
+                      (f & F_LONG) != 0);
+    }
+    en_glow[EN_ROW_SYNTH] = 1.0f;
+}
+
 static void play_step(int s)
 {
     const step_t *e = &bar[s];
@@ -1914,44 +2163,14 @@ static void play_step(int s)
         if (e->tom)
             tom_fire((float)e->tom * (1.0f / 127.0f), e->tom_kind > 2 ? 2 : e->tom_kind);
         if (e->hat)
-            hat_fire(e->hat_kind, (float)e->hat * (1.0f / 127.0f));
+            hat_fire(e->hat_kind > 2 ? 2 : e->hat_kind, (float)e->hat * (1.0f / 127.0f));
     }
-    if (e->bass.n != REST && on(LY_BASS)) {
-        int n = 36 + root + en_degree(pool, chord_deg + e->bass.n);
-        const int slide_next = s < EN_NSTEP - 1 && bar[s + 1].bass.n != REST && (bar[s + 1].bass.f & F_SLIDE);
-        int32_t len = (int32_t)(step_len * ((e->bass.f & F_LONG) ? 7.0f : slide_next ? 1.15f : 0.7f));
-        while (n > 50)
-            n -= 12;
-        while (n < 31)
-            n += 12;
-        if (e->bass.f & F_OCT)
-            n += 12;
-        bass_play(n, e->bass.f, len);
-    }
-    if (e->gtr.n != REST && on(LY_GUITAR)) {
-        int n = 36 + root + en_degree(pool, chord_deg + e->gtr.n);
-        while (n >= 48)
-            n -= 12;
-        gtr_play(n, e->gtr.f, (e->gtr.f & F_ACC) ? 1.0f : 0.8f);
-    }
-    if (e->syn.n != REST && on(LY_SYNTH)) {
-        const int d = chord_deg + e->syn.n, base = 48 + root;
-        const float vel = (e->syn.f & F_ACC) ? 0.95f : 0.7f;
-        if (e->syn.f & F_LEAD) {                 /* a line: one voice, an octave up */
-            int n = base + 12 + en_degree(pool, d);
-            while (n > 79)
-                n -= 12;
-            syn_voice(n, vel, 0.25f * (float)(s & 2) - 0.25f, 0, 0);
-        } else {                                 /* a stab: the chord on the degree (stacked thirds) */
-            int n0 = base + en_degree(pool, d), k;
-            while (n0 >= 60 + root % 12 && n0 > 57)
-                n0 -= 12;
-            for (k = 0; k < 3; k++)
-                syn_voice(n0 + en_degree(pool, d + 2 * k) - en_degree(pool, d), vel, (float)(k - 1) * 0.55f, k * 40,
-                          (e->syn.f & F_LONG) != 0);
-        }
-        en_glow[EN_ROW_SYNTH] = 1.0f;
-    }
+    if (e->bass.n != REST && on(LY_BASS))
+        bass_note(e->bass.n, e->bass.f, s < EN_NSTEP - 1 && bar[s + 1].bass.n != REST && (bar[s + 1].bass.f & F_SLIDE));
+    if (e->gtr.n != REST && on(LY_GUITAR))
+        gtr_note(e->gtr.n, e->gtr.f);
+    if (e->syn.n != REST && on(LY_SYNTH))
+        syn_note(e->syn.n, e->syn.f, s);
     if (e->metal && on(LY_METAL)) {
         if (e->metal & 1u)
             metal_hit(0, 0.6f + 0.3f * frand());
@@ -1960,11 +2179,116 @@ static void play_step(int s)
     }
 }
 
+/* the editor's sounds, now (the bar's chord while playing, else the root's) */
+static void audition(int l, int what, uint8_t f)
+{
+    const int keep = chord_deg;
+    if (!en_playing)
+        chord_deg = 0;
+    switch (l) {
+    case LY_DRUMS:
+        if (what == EN_HIT_KICK)
+            kick_fire(0.85f, 0, 0);
+        else if (what == EN_HIT_SNARE)
+            snare_fire(0.8f);
+        else if (what >= EN_HIT_HAT && what <= EN_HIT_CRASH)
+            hat_fire(what - EN_HIT_HAT, 0.8f);
+        else if (what >= EN_HIT_TOM_HIGH && what <= EN_HIT_TOM_LOW)
+            tom_fire(0.85f, what - EN_HIT_TOM_HIGH);
+        break;
+    case LY_BASS: bass_note(what, f, 0); break;
+    case LY_GUITAR: gtr_note(what, f); break;
+    case LY_SYNTH: syn_note(what, f, 0); break;
+    case LY_METAL: metal_hit(what & 1, 0.75f); break;
+    default: break;
+    }
+    chord_deg = keep;
+}
+
 static void pending_publish(void)
 {
     en_pending = (uint8_t)((pend_kind == 1 ? EN_PEND_NEXT : 0) | (pend_kind == 2 ? EN_PEND_BREAK : 0) |
-                           (pend_fill || fill_on ? EN_PEND_FILL : 0) | (pend_mutate || pend_regrow ? EN_PEND_MUTATE : 0) |
+                           (pend_fill || fill_on ? EN_PEND_FILL : 0) | (pend_mutate || pend_top ? EN_PEND_MUTATE : 0) |
                            (root_pend >= 0 ? EN_PEND_ROOT : 0));
+}
+
+/* OCT+: on auto, new everything; locked, new lines for the part playing */
+static void mutate(void)
+{
+    if (en_song.locked)
+        gen(W_LINES, 1 << part);
+    else
+        gen(W_ALL, 7);
+}
+
+/* a knob that writes the song was turned (en_turned): what it writes */
+static int turned_writes(int p)
+{
+    switch (p) {
+    case P_GROOVE: return W_DRUMS | (en_song.locked ? 0 : W_BASS | W_GTR);
+    case P_RIFF: return W_GTR;
+    case P_SBUSY: return W_SYN;
+    case P_HITS: return W_HITS;
+    default: return 0;
+    }
+}
+static void write_turned(int w)                 /* the verse's and the chorus's; the synth's breakdown too */
+{
+    gen(w & ~W_SYN, 3);
+    gen(w & W_SYN, 7);
+}
+
+/* Intensity: on auto the plan's layers are dealt again; locked, they stand */
+static void repick(void)
+{
+    int i, n = plan_count();
+    if (!en_song.locked)
+        for (i = 0; i < n; i++)
+            en_song.plan[i].layers = pick_layers(plan_type(i), 1);
+    sect_resolve(0);
+}
+
+/* en_song changed under the render (the player's edits): the section playing follows its entry, and the
+ * bar is built again (its fill too, but a fill waiting for the next bar keeps waiting) */
+static void rebuild(void)
+{
+    const uint8_t pf = pend_fill;
+    const int n = plan_count();
+    if (plan_pos >= n)
+        plan_pos = n - 1;
+    if (!jumped && plan_type(plan_pos) != sect) {
+        sect = plan_type(plan_pos);
+        en_sect = (uint8_t)sect;
+    }
+    part = en_part_of(sect);
+    en_part = (uint8_t)part;
+    sect_resolve(1);
+    if (sect_len && sect_bar >= sect_len)
+        sect_bar = sect_len - 1;
+    en_sect_bar = (uint8_t)sect_bar;
+    metal_tune();
+    plan_publish();
+    pend_fill = 0;
+    bar_build();
+    pend_fill = pf;
+}
+
+/* a new song in en_song (another piece, or auto again): on auto the machine writes it first; from the
+ * top, at the bar while playing */
+static void loaded(void)
+{
+    if (!en_song.locked) {
+        gen(W_ALL, 7);
+        plan_song();
+    }
+    metal_tune();
+    if (en_playing) {
+        pend_top = 1;
+        plan_publish();
+    } else {
+        song_top();
+        bar_build();
+    }
 }
 
 /* the grid: one call a sixteenth (MIDI clock: 6 ticks) */
@@ -1980,31 +2304,26 @@ static void bar_start(void)
             pend_kind = 0;
         } else if (sect_len && sect_bar >= sect_len) {
             sect_next();
-        } else if ((sect_bar & 3) == 0) {
+        } else if ((sect_bar & 3) == 0 && !en_song.locked) {
             evolve_step();
         }
     }
     bar_fresh = 0;
-    if (pend_regrow) {
-        gen(R_ALL);
-        plan_song();
-        plan_pos = 0;
-        jumped = 0;
-        jq_n = 0;
-        sect_begin(plan[0]);
-        pend_regrow = 0;
+    if (pend_top) {
+        song_top();
+        pend_top = 0;
     }
     if (pend_mutate) {
-        gen(R_ALL);
+        mutate();
         pend_mutate = 0;
-    } else if (pend_regen) {
-        gen(pend_regen);
     }
-    pend_regen = 0;
+    if (pend_write) {
+        write_turned(pend_write);
+        pend_write = 0;
+    }
     pend_rebuild = 0;
     if (pend_act) {
-        pick_act();
-        tex.tgt = (act >> LY_NOISE & 1u) ? SECT_NOISE[sect] : 0.0f;
+        repick();
         pend_act = 0;
     }
     if (root_pend >= 0) {
@@ -2066,17 +2385,18 @@ static void apply(int p, int v)
         tempo_set();
         delay_time();
         break;
-    case P_ARRANGE:
-        sect_len = en_sect_bars(sect, v);
+    case P_ARRANGE: {
+        const en_entry_t *e = sect_entry();
+        sect_len = e ? entry_len(e) : en_sect_bars(sect, v);
         en_sect_len = (uint8_t)sect_len;
         plan_publish();
         break;
+    }
     case P_EVOLVE: evolve = (float)v * 0.01f; break;
     case P_INTENSITY:
         intensity = (float)v * 0.01f;
         pend_act = 1;
         break;
-    case P_GROOVE: pend_regen |= R_BASS | R_GTR; break;
     case P_CRUSH:
         crush_amt = (float)v * 0.01f;
         crush_hold = 1 + (int)(crush_amt * crush_amt * 11.0f);
@@ -2100,11 +2420,12 @@ static void apply(int p, int v)
         break;
     case P_GAIN: gtr_gain = 3.0f + 60.0f * (float)(v * v) * 0.0001f; break;
     case P_CHUG: gtr_chug = (float)v * 0.01f; break;
-    case P_RIFF: pend_regen |= R_GTR; break;
     case P_STONE: syn_tone = (float)v * 0.01f; break;
     case P_SDECAY: syn_decay = (float)v * 0.01f; break;
-    case P_SBUSY: pend_regen |= R_SYN; break;
-    case P_TEXTURE: tex_t = (float)v * 0.01f; break;
+    case P_TEXTURE:
+        if (tex_knob)
+            tex_goal = (float)v * 0.01f;
+        break;
     case P_REVERB: rev_send = (float)(v * v) * 0.0001f; break;
     case P_GATE: gate_amt = (float)v * 0.01f; break;
     case P_DELAY: dly_send = (float)(v * v) * 0.0001f; break;
@@ -2187,14 +2508,14 @@ void en_init(void)
     root_pend = -1;
     for (i = 0; i < P_NPARAMS; i++)
         apply(i, PARAMS[i].def);
-    gen(R_ALL);
+    en_song_defaults(&en_song);
+    gen(W_ALL, 7);
     plan_song();
-    plan_pos = 0;
-    jq_n = 0;
     pend_kind = 0;
-    pend_fill = pend_mutate = pend_regen = pend_act = pend_regrow = 0;
+    pend_fill = pend_mutate = pend_write = pend_act = pend_top = 0;
     sect = S_INTRO;
-    sect_begin(plan[0]);
+    song_top();
+    tex_t = tex_goal;
     sixteenth = 0;
     bar_fresh = 1;
     bar_build();
@@ -2219,10 +2540,8 @@ static void play_start(int from_top)
     sixteenth = 0;
     bar_fresh = 1;
     if (from_top) {
-        plan_pos = 0;
-        jq_n = 0;
-        jumped = 0;
-        sect_begin(plan[0]);
+        pend_top = 0;
+        song_top();
     } else {
         sect_bar = 0;
         en_sect_bar = 0;
@@ -2286,10 +2605,12 @@ static void drain(void)
             break;
         case C_FILL: fill_now(0); break;
         case C_MUTATE:
-            if (en_playing)
+            if (en_playing) {
                 pend_mutate = 1;
-            else
-                gen(R_ALL), bar_build();
+            } else {
+                mutate();
+                bar_build();
+            }
             break;
         case C_MUTE:
             if (a < EN_NLAYER) {
@@ -2321,19 +2642,17 @@ static void drain(void)
             }
             break;
         case C_PANIC: quiet(); break;
-        case C_REGROW:
+        case C_LOADED: loaded(); break;
+        case C_REBUILD: rebuild(); break;
+        case C_TURNED:
             if (en_playing) {
-                pend_regrow = 1;
+                pend_write |= (uint8_t)turned_writes(a);
             } else {
-                gen(R_ALL);
-                plan_song();
-                plan_pos = 0;
-                jumped = 0;
-                jq_n = 0;
-                sect_begin(plan[0]);
+                write_turned(turned_writes(a));
                 bar_build();
             }
             break;
+        case C_AUDITION: audition(a, (int8_t)(b & 0xFF), (uint8_t)(b >> 8 & 0xFF)); break;
         }
     }
     pending_publish();

@@ -19,6 +19,13 @@
  * The ARRANGER plays songs: intro, verses, builds, choruses, a breakdown, a drop, an outro; then a new
  * song from new material. Each section decides which layers play; the last bar of a section fills; a
  * build rolls the snare and opens the filters. Arrange sets the sections' lengths (or loops one).
+ *
+ * A piece's SONG (en_song) is all of it: three parts (A the verse, also the intro, the build and the outro;
+ * B the chorus, also the drop; C the breakdown), each a bar of every layer and four chords, then the plan
+ * (the sections in order, their lengths, the layers in each) and the metal's two rings. While the piece is
+ * on auto the machine writes it, and rewrites it as it goes; locked, nothing changes by itself, and the
+ * player edits it (the UI writes en_song directly; the render plays it from the next bar, or at once after
+ * en_rebuild).
  * Then: a ping-pong delay (a dotted eighth), Dattorro's plate (from FoMni) behind a gate, and the kick
  * pumping the rest (Pump).
  *
@@ -72,18 +79,76 @@ const en_param_t *en_param_info(int i);
 void en_param_text(int i, int v, char *buf);   /* the value as the screen shows it (10 bytes) */
 extern const uint8_t EN_LAYER_PARAM[EN_NLAYER]; /* each layer's level */
 
+/* ------------------------------------------------------------- the song --- */
+#define EN_NPARTS 3                    /* A the verse (intro, build, outro), B the chorus (drop), C the breakdown */
+#define EN_PLAN_MAX 16                 /* sections in a song */
+#define EN_MAX_BARS 32                 /* a section's length, at most */
+#define EN_REST (-128)
+enum { EN_F_ACC = 1, EN_F_SLIDE = 2, EN_F_LONG = 4, EN_F_OPEN = 8, EN_F_OCT = 16, EN_F_LEAD = 32 };
+typedef struct {
+    int8_t n;                          /* a scale degree above the bar's chord (-7..14), EN_REST: none */
+    uint8_t f;                         /* EN_F_*: an accent; the bass slides into it; long (a held note, the
+                                          synth's chord rings); the guitar's open chord (else a palm-muted chug);
+                                          the bass an octave up; the synth one voice an octave up (a line) */
+} en_note_t;
+enum { EN_HAT_CLOSED, EN_HAT_OPEN, EN_HAT_CRASH };
+enum { EN_TOM_HIGH, EN_TOM_MID, EN_TOM_LOW };
+#define EN_VEL_GHOST 40
+#define EN_VEL_HIT 92
+#define EN_VEL_ACC 120
+typedef struct {
+    uint8_t kick[EN_NSTEP], snare[EN_NSTEP], hat[EN_NSTEP], tom[EN_NSTEP];   /* velocities, 0 none */
+    uint8_t hat_kind[EN_NSTEP], tom_kind[EN_NSTEP];                         /* EN_HAT_*, EN_TOM_* */
+    en_note_t bass[EN_NSTEP], gtr[EN_NSTEP], syn[EN_NSTEP];
+    int8_t prog[4];                    /* the chords: scale degrees, each a quarter of the section */
+} en_part_t;
+enum { EN_TEX_KNOB, EN_TEX_DRONE, EN_TEX_STATIC, EN_TEX_BOTH, EN_NTEX };
+typedef struct {
+    uint8_t type;                      /* S_* */
+    uint8_t bars;                      /* 1..EN_MAX_BARS; 0: as Arrange says */
+    uint8_t layers;                    /* bit l: layer l plays */
+    uint8_t tex;                       /* the noise layer's bed: EN_TEX_* (KNOB: as Texture says) */
+} en_entry_t;
+typedef struct {
+    en_part_t part[EN_NPARTS];
+    en_entry_t plan[EN_PLAN_MAX];      /* the sections, in order */
+    uint8_t plan_n;                    /* 1..EN_PLAN_MAX */
+    uint8_t locked;                    /* 0 auto: the machine writes it; 1 locked: nothing changes by itself */
+    uint8_t ring_len[2], ring_hits[2], ring_turn[2];   /* the metal's two Euclidean rings: the anvil, the scrap */
+    uint8_t metal_tone;                /* the clangs' pitches */
+    uint8_t rsv[7];
+} en_song_t;
+extern en_song_t en_song;              /* the piece's song, as it plays (see above) */
+int en_part_of(int sect);              /* the part a section plays (0 A, 1 B, 2 C) */
+extern const char *const EN_PART_NAME[EN_NPARTS];
+int en_song_valid(const en_song_t *s);
+void en_song_defaults(en_song_t *s);   /* an empty song: silent parts, a plan of one verse; auto */
+
 /* commands (main loop -> render) */
 void en_init(void);
+void en_lock(int on);                  /* locked: nothing changes by itself; auto: the machine writes on */
+void en_song_loaded(void);             /* en_song was replaced (another piece): from the top; on auto the
+                                          machine writes it anew first */
+void en_rebuild(void);                 /* en_song was edited: what plays now follows it */
+void en_turned(int param);             /* the player turned a knob that writes the song: Groove (the drums;
+                                          on auto the bass and the guitar too), Riff (the guitar), Busy (the
+                                          synth), Hits (the rings' hits). At the bar */
+void en_audition(int layer, int what, int flags);  /* a sound, now: drums EN_HIT_*; bass, guitar, synth:
+                                          scale degree what, EN_F_* flags; metal: 0 the anvil, 1 scrap */
+enum { EN_HIT_KICK, EN_HIT_SNARE, EN_HIT_HAT, EN_HIT_OPEN, EN_HIT_CRASH, EN_HIT_TOM_HIGH, EN_HIT_TOM_MID,
+       EN_HIT_TOM_LOW, EN_NHIT };
 void en_set(int param, int value);             /* P_ROOT while playing: on the next bar */
 void en_play(int on);                          /* run / stop (the tails ring on) */
 void en_next(void);                            /* the next section: the rest of this bar fills, then it */
 void en_break(void);                           /* a breakdown; in one, the build; in the build, the drop */
 void en_fill(void);                            /* the rest of this bar: a fill */
-void en_mutate(void);                          /* new material (riffs, lines, patterns) from the next bar */
+void en_mutate(void);                          /* new material from the next bar: on auto all of it (riffs,
+                                                  lines, patterns, chords); locked, the lines of the part
+                                                  playing */
 void en_mute(int layer, int on);
 void en_seed(uint32_t s);                      /* stir some entropy into the generators */
 void en_panic(void);                           /* everything quiet, now */
-void en_regrow(void);                          /* a new piece: a new song from the top */
+void en_regrow(void);                          /* auto, and a new song written from the top */
 /* MIDI clock in (as FoMni): ticks drive the 1/16 grid (6 a step) while they keep coming */
 enum { EN_CLK_TICK, EN_CLK_START, EN_CLK_CONTINUE, EN_CLK_STOP };
 void en_clock(int msg);
@@ -95,18 +160,18 @@ void en_render(int32_t *out_lr, uint32_t n, uint32_t gain_q12);
 void en_midi_out(uint32_t st, uint32_t d1, uint32_t d2);
 
 /* state for the screen (UI) */
-#define EN_PLAN_MAX 14
 enum { EN_ROW_KICK, EN_ROW_SNARE, EN_ROW_HAT, EN_ROW_METAL, EN_ROW_BASS, EN_ROW_GUITAR, EN_ROW_SYNTH, EN_NROW };
 extern volatile uint8_t en_playing, en_ext;
 extern volatile uint8_t en_sect;               /* the section playing (S_*) */
 extern volatile uint8_t en_sect_bar;           /* its bar, from 0 */
 extern volatile uint8_t en_sect_len;           /* its length in bars; 0 = looping (Arrange: Loop) */
 extern volatile uint8_t en_plan[EN_PLAN_MAX];  /* the song: its sections, in order */
-extern volatile uint8_t en_plan_len[EN_PLAN_MAX];   /* and their lengths in bars */
+extern volatile uint8_t en_plan_len[EN_PLAN_MAX];   /* and their lengths in bars (0: it loops) */
 extern volatile uint8_t en_plan_n, en_plan_pos;     /* how many; which plays (a jump plays outside the plan) */
 extern volatile uint8_t en_jumped;             /* the section playing came from a button, not the plan */
+extern volatile uint8_t en_part;               /* the part it plays */
 extern volatile uint8_t en_sect_next;          /* the section after this one (a jump's, or the plan's) */
-extern volatile uint16_t en_song;              /* songs begun since power-on */
+extern volatile uint16_t en_songs;             /* songs begun since power-on */
 extern volatile uint8_t en_step;               /* the sixteenth playing, 0..15 */
 extern volatile uint8_t en_root_now;           /* the root sounding (pitch class); P_ROOT may be on its way */
 extern volatile uint8_t en_chord_root;         /* the progression's root now (pitch class) */

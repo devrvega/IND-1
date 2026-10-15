@@ -392,7 +392,7 @@ static int expect(const char *what, const char *val)
     else if (!strcmp(what, "pending"))
         got = en_pending;
     else if (!strcmp(what, "song"))
-        got = en_song;
+        got = en_songs;
     else if (!strcmp(what, "planpos"))
         got = en_plan_pos;
     else if (!strcmp(what, "jumped"))
