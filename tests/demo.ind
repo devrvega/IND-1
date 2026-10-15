@@ -1,0 +1,47 @@
+# a listen: about seventy seconds of each piece from its intro, Arrange Short so a song goes by
+# build/host/ind_host tests/demo.ind build/demo   (not part of tests/run_tests.sh: nine minutes of audio)
+wait 100
+tap GLO
+wait 50
+tap HOME
+spin K2 1
+expect par1 3
+wav 1-foundry.wav
+wait 70000
+wavstop
+turn PRESET 1
+spin K2 3
+wav 2-rivethead.wav
+wait 60000
+wavstop
+turn PRESET 1
+spin K2 3
+wav 3-neon-wound.wav
+wait 70000
+wavstop
+turn PRESET 1
+spin K2 3
+wav 4-dead-air.wav
+wait 70000
+wavstop
+turn PRESET 1
+spin K2 3
+wav 5-sledge.wav
+wait 70000
+wavstop
+turn PRESET 1
+spin K2 3
+wav 6-cold-wire.wav
+wait 70000
+wavstop
+turn PRESET 1
+spin K2 3
+wav 7-scrapyard.wav
+wait 70000
+wavstop
+turn PRESET 1
+spin K2 3
+wav 8-klaxon.wav
+wait 60000
+wavstop
+expect peak_db_max -0.3

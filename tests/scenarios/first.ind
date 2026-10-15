@@ -1,0 +1,51 @@
+# a first look and listen: it runs from power-on with the first piece (Foundry: E Phrygian, 122); the
+# intro leads into a verse; every page; a minute of the machine
+wav first.wav
+wait 200
+expect playing 1
+expect piece 0
+expect par0 122
+expect root 4
+expect section 0
+wait 3000
+shot intro.png
+until section 1 20000
+wait 4000
+shot verse.png
+expect sixteenths >100
+wait 30000
+shot later.png
+wavstop
+expect peak_db_max -0.3
+expect peak_db_min -30
+tap SEQ
+wait 100
+shot drums.png
+tap LFO
+wait 100
+shot bass.png
+tap ENV
+wait 100
+shot guitar.png
+tap ARP
+wait 100
+shot synth.png
+tap SEL
+wait 100
+shot metal.png
+tap FX
+wait 100
+shot space.png
+tap GLO
+wait 100
+shot setup.png
+# SELECT steps through the pages, from the last back to the first
+turn SELECT -7 100
+expect view 0
+# help cards: a held button shows its card, then its release does nothing
+press OCT+
+wait 1000
+shot help_mutate.png
+release OCT+
+wait 100
+expect pending 0

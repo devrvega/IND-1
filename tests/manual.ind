@@ -1,0 +1,67 @@
+# the manual's screenshots (tools/manual_shots.sh copies them into docs/img): Foundry, from power-on
+wait 200
+until section 1 20000
+wait 5000
+shot screen-verse.png
+tap SEQ
+wait 100
+shot screen-drums.png
+tap LFO
+wait 100
+shot screen-bass.png
+tap ENV
+wait 100
+shot screen-guitar.png
+tap ARP
+wait 100
+shot screen-synth.png
+tap SEL
+wait 100
+shot screen-metal.png
+tap FX
+wait 100
+shot screen-space.png
+turn K2 2 80
+wait 100
+shot screen-turning.png
+tap GLO
+wait 100
+shot screen-setup.png
+tap HOME
+wait 1500
+shot screen-machine.png
+press SAVE
+wait 1000
+shot screen-help.png
+release SAVE
+wait 300
+# a breakdown, a mute
+until step 2 4000
+tap REC
+wait 50
+shot screen-pending.png
+until section 4 4000
+wait 4000
+shot screen-breakdown.png
+tap REC
+until section 2 4000
+wait 3000
+shot screen-build.png
+until section 5 12000
+wait 1500
+press EDIT
+tap ENV
+release EDIT
+wait 300
+tap ENV
+wait 1000
+shot screen-muted.png
+press EDIT
+tap ENV
+release EDIT
+tap HOME
+# a key: the root on its way
+until step 3 4000
+tapkey 6
+wait 40
+shot screen-root.png

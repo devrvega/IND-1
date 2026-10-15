@@ -1,0 +1,95 @@
+# the pieces: PRESETS picks one, each remembers how it was left, SAVE held resets one, all saved; the
+# mode on ALGORITHM; tempo with HOME + SELECT; persistence across a reboot; AMB-1's project ignored
+wait 300
+expect piece 0
+# Foundry's guitar down (the Guitar page: ENV)
+tap ENV
+spin K1 -10
+expect par12 50
+# the next piece: Rivethead (D Phrygian dominant, 160, thrash)
+turn PRESET 1
+expect piece 1
+expect par0 160
+expect par5 4
+expect par28 2
+expect par31 3
+wait 8000
+shot rivethead.png
+# Neon Wound, then each of the others
+turn PRESET 1
+expect piece 2
+wait 6000
+shot neon_wound.png
+turn PRESET 1
+wait 6000
+shot dead_air.png
+turn PRESET 1
+wait 6000
+shot sledge.png
+turn PRESET 1
+wait 6000
+shot cold_wire.png
+expect par12 0
+turn PRESET 1
+wait 6000
+shot scrapyard.png
+turn PRESET 1
+expect piece 7
+wait 6000
+shot klaxon.png
+# back to Foundry: as it was left
+turn PRESET 1
+expect piece 0
+expect par12 50
+# the mode: ALGORITHM
+turn ALGO 1
+expect par31 1
+turn ALGO -2
+expect par31 7
+turn ALGO 1
+expect par31 0
+# HOME + SELECT: the tempo, from any page
+press HOME
+turn SELECT 3 100
+release HOME
+expect par0 125
+expect view 3
+# SAVE held: Foundry's recipe again (not saved)
+press SAVE
+wait 1700
+release SAVE
+expect par12 60
+expect par0 122
+expect store_writes 0
+# a tweak, saved, survives a reboot, on the piece it was made on
+tap SEQ
+spin K3 20
+expect par6 35
+turn PRESET 5
+expect piece 5
+tap SAVE
+expect store_writes 1
+reboot
+wait 300
+expect piece 5
+turn PRESET 3
+expect piece 0
+expect par6 35
+# while stopped, a change saves itself (the piece change above first, then a tweak)
+tap PLAY
+wait 8000
+expect dirty 0
+expect store_writes 2
+tap ENV
+spin K2 5
+expect dirty 1
+wait 6000
+expect dirty 0
+expect store_writes 3
+# AMB-1's project (another magic, at the same place in flash): the defaults instead
+storeamb
+reboot
+wait 300
+expect piece 0
+expect par0 122
+expect par6 15

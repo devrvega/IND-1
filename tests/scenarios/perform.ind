@@ -1,0 +1,106 @@
+# playing it: the root on the bar from the keys and MIDI, a fill, the next section, the breakdown and the
+# drop, mutes (EDIT + a page button), mutate; and the update-mode chord doesn't fill or mutate
+wait 200
+expect playing 1
+# Loop: a section holds until a button moves it
+spin K2 -2
+expect par1 0
+until section 1 20000
+wait 2000
+shot verse_loop.png
+expect sectlen 0
+# a key: A (key 4 is A3); the project has it at once, the sound on the next downbeat
+until step 5 3000
+tapkey 4
+expect root 9
+expect root_now 4
+expect pending 16
+wait 20
+shot root_pending.png
+until root_now 9 3000
+expect step 0
+expect pending 0
+wait 50
+leds
+# MIDI channel 1: a note moves it too (D, 62)
+midi 90 3E 64
+wait 20
+expect root 2
+until root_now 2 3000
+# a fill: the rest of the bar
+until step 2 3000
+tap OCT-
+wait 50
+expect pending 4
+shot fill.png
+# REC: a breakdown on the bar (the rest of this one fills); again: the build; it leads to the drop
+until pending 0 3000
+until step 3 3000
+tap REC
+wait 30
+expect pending 6
+until section 4 4000
+wait 100
+shot breakdown.png
+wait 4000
+expect section 4
+tap REC
+until section 2 4000
+wait 100
+shot build.png
+until section 5 16000
+wait 100
+shot drop.png
+expect jumped 1
+# mutes: EDIT held, a page button. The drums' MIDI stops, the screen says MUTED
+press EDIT
+tap SEQ
+release EDIT
+wait 30
+expect muted 1
+expect view 0
+tap SEQ
+wait 100
+expect view 1
+shot muted.png
+press EDIT
+tap SEL
+release EDIT
+wait 30
+expect muted 49
+press EDIT
+tap SEQ
+tap SEL
+release EDIT
+wait 30
+expect muted 0
+# EDIT alone moves on (on its release): back in the song's plan after the jump
+expect section 5
+until step 6 3000
+tap EDIT
+wait 30
+expect pending 5
+until jumped 0 4000
+expect section >0
+# mutate: on the bar
+tap OCT+
+wait 30
+expect pending 8
+until pending 0 3000
+# both octave buttons held a moment (the update mode's countdown, cancelled): no fill, no mutate
+press OCT-
+press OCT+
+wait 2500
+release OCT-
+release OCT+
+wait 20
+expect pending 0
+# stop and start: it starts where it was
+tap PLAY
+wait 50
+expect playing 0
+wait 6000
+expect level0 0
+tap PLAY
+wait 50
+expect playing 1

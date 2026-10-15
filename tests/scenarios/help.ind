@@ -1,0 +1,35 @@
+# every button's card: hold, see, let go; nothing happens after
+wait 300
+press HOME
+wait 1000
+shot help_home.png
+release HOME
+press REC
+wait 1000
+shot help_rec.png
+release REC
+wait 50
+expect section 0
+expect pending 0
+press EDIT
+wait 1000
+shot help_edit.png
+release EDIT
+wait 50
+expect pending 0
+press SEL
+wait 1000
+shot help_sel.png
+release SEL
+wait 50
+expect view 0
+press OCT-
+wait 1000
+release OCT-
+wait 50
+expect pending 0
+press SAVE
+wait 1000
+shot help_save.png
+release SAVE
+expect store_writes 0
