@@ -11,6 +11,9 @@ a Pro-1-style sequenced bass, two synthesized guitars, Xpander / Prophet VS-styl
 percussion, and a bed of drone and static. You steer it, and when you like what it plays, you lock the song
 and write it yourself, step by step.
 
+**Version 1.0** is the first release marked production ready. What changed in each release is in the
+[changelog](CHANGELOG.md).
+
 On the screen the song is a quest through a dark keep, on an LCD of the old handheld kind: near-black glass,
 ember segments and their ghosts. The wanderer at the gate, in the halls, up the stair, in battle, at the
 campfire, against the Warden, out into the dawn; the drums swing the sword, the bass walks, the guitars

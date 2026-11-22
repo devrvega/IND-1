@@ -44,7 +44,7 @@ On Linux x86-64 the toolchain runs natively and Docker is not needed.
 `JIELI_TOOLCHAIN` and `AC79_SDK` override the default locations
 (`~/.jieli/toolchain`, `~/fw-AC79_AIoT_SDK`).
 
-`./build.sh --release 0.2.0` makes a release build; the package is `build/ind-0.2.0.fwsc`.
+`./build.sh --release 1.0.0` makes a release build; the package is `build/ind-1.0.0.fwsc`.
 
 Every build answers a load query over USB-MIDI: send `F0 7D 49 31 01 F7` and the FM-1 replies `F0 7D 49 31 01`
 with the load (%), the slowest render (µs, of the 5805 µs a 256-frame block has), late renders, renders, and

@@ -2,6 +2,12 @@
 
 Each release's notes come from its section here (`tools/release_notes.py`). The newest is first.
 
+## 1.0.0 — 2026-11-22
+
+- **Production ready:** 1.0 is the first release of IND-1 marked as ready for everyday use. There are no firmware
+  changes since 0.2.1.
+- **Documentation:** version numbers in the build instructions.
+
 ## 0.2.1 — 2026-10-16
 
 - **Fixed:** safe mode can be reached over USB again after a crash. If the FM-1 crashed while it was making sound,
